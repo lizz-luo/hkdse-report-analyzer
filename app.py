@@ -214,86 +214,7 @@ def convert_df_to_excel(df, sheet_name):
 # ==========================================
 # 建立主畫面三個標籤頁 (Tabs) 入口
 # ==========================================
-
-# ==========================================
-# 輔助函數：初始化自定義分類欄位 (Item)
-# ==========================================
-def prepare_item_analysis_for_custom(df):
-    df = df.copy()
-    if "題號" not in df.columns:
-        df.insert(0, "題號", range(1, len(df) + 1))
-    for col in ["考試範圍", "題目類型", "測試技能"]:
-        if col not in df.columns:
-            df[col] = ""
-    return df
-
-# ==========================================
-# 輔助函數：初始化自定義分類欄位 (MCQ) + 計算最高票
-# ==========================================
-def prepare_mcq_analysis_for_custom(df):
-    df = df.copy()
-    if "題號" not in df.columns:
-        df.insert(0, "題號", range(1, len(df) + 1))
-    for col in ["考試範圍", "題目類型", "測試技能"]:
-        if col not in df.columns:
-            df[col] = ""
-
-    def get_top_option(row, prefix):
-        opts = {
-            "A": pd.to_numeric(row.get(f"{prefix} A_No.", 0), errors='coerce') or 0,
-            "B": pd.to_numeric(row.get(f"{prefix} B_No.", 0), errors='coerce') or 0,
-            "C": pd.to_numeric(row.get(f"{prefix} C_No.", 0), errors='coerce') or 0,
-            "D": pd.to_numeric(row.get(f"{prefix} D_No.", 0), errors='coerce') or 0,
-        }
-        return max(opts, key=opts.get)
-
-    df["Your school 最高票"] = df.apply(lambda r: get_top_option(r, "Your school"), axis=1)
-    df["Day schools 最高票"] = df.apply(lambda r: get_top_option(r, "Day schools"), axis=1)
-    return df
-
-# ==========================================
-# 輔助函數：自定義過濾與排序
-# ==========================================
-def apply_custom_filters(df, scope, type_f, skill):
-    res = df.copy()
-    if scope: res = res[res["考試範圍"].isin(scope)]
-    if type_f: res = res[res["題目類型"].isin(type_f)]
-    if skill: res = res[res["測試技能"].isin(skill)]
-    return res
-
-def sort_custom_df(df, sort_by, sort_order):
-    if sort_by == "預設 (按題號)":
-        return df.sort_values("題號", ascending=True) if "題號" in df.columns else df
-    return df.sort_values(sort_by, ascending=(sort_order == "由低至高"))
-
-# ==========================================
-# 輔助函數：MCQ 高亮邏輯
-# ==========================================
-def highlight_mcq_row(row):
-    your_top = row.get("Your school 最高票")
-    day_top = row.get("Day schools 最高票")
-    corr_ans = row.get("Corr. Ans")
-
-    # 移除打勾符號，確保乾淨比對
-    if isinstance(corr_ans, str):
-        corr_ans = corr_ans.replace("☑️", "").strip()
-
-    cond1 = (your_top != corr_ans)
-    cond2 = (your_top != day_top)
-
-    if cond1 and cond2: color = "background-color: #f8d7da"  # 紅色
-    elif cond1: color = "background-color: #fff2cc"  # 黃色
-    elif cond2: color = "background-color: #cce5ff"  # 藍色
-    else: color = ""
-    return [color] * len(row)
-
-tab0, tab1, tab2, tab3, tab4 = st.tabs([
-    "📊 總數轉換 | Total Analysis", 
-    "📝 項目分析轉換 | Item Analysis", 
-    "✅ MCQ轉換 | MCQ Analysis",
-    "📌 自定義項目分析 | Custom Item Analysis",
-    "🎯 自定義MCQ分析 | Custom MCQ Analysis"
-])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["📊 總數分析 Total Analysis", "📝 項目分析報告 Item Analysis Report", "✅ 多項選擇題報告 MCQ Analysis Report", "📌 自定義項目分析", "🎯 自定義MCQ分析"])
 
 # -----------------
 # 標籤頁 0 的內容 / Tab 0 Content
@@ -443,121 +364,278 @@ with tab2:
                 except Exception as e:
                     st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
 
-
-
-# -----------------
-# 標籤頁 3 的內容 / Tab 3 Content (自定義項目分析)
-# -----------------
-with tab3:
-    st.subheader("📌 自定義項目分析 | Custom Item Analysis")
-    if global_file is None:
-        st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
-    else:
-        with st.spinner("正在載入數據..."):
-            try:
-                global_file.seek(0)
-                df_item_custom = extract_item_analysis(global_file)
-                if df_item_custom.empty:
-                    st.error("❌ 無法提取數據！請確認 PDF 包含「項目分析報告」。")
-                else:
-                    df_item_custom = prepare_item_analysis_for_custom(df_item_custom)
-
-                    st.info("✏️ **Step 1：自定義分類** - 請直接在下表的「考試範圍」、「題目類型」與「測試技能」點擊輸入。")
-                    editable = ["考試範圍", "題目類型", "測試技能"]
-                    disabled = [c for c in df_item_custom.columns if c not in editable]
-
-                    edited_item = st.data_editor(
-                        df_item_custom, disabled=disabled,
-                        use_container_width=True, hide_index=True, key="item_editor"
-                    )
-
-                    st.markdown("---")
-                    st.info("🔍 **Step 2：篩選與排序**")
-                    c1, c2, c3 = st.columns(3)
-                    with c1: scope = st.multiselect("考試範圍", [x for x in edited_item["考試範圍"].unique() if x], key="i_scope")
-                    with c2: type_f = st.multiselect("題目類型", [x for x in edited_item["題目類型"].unique() if x], key="i_type")
-                    with c3: skill = st.multiselect("測試技能", [x for x in edited_item["測試技能"].unique() if x], key="i_skill")
-
-                    c4, c5 = st.columns(2)
-                    sort_cols = ["預設 (按題號)"] + [c for c in edited_item.columns if "Mean %" in c]
-                    with c4: sort_by = st.selectbox("排序依據", sort_cols, key="i_sort")
-                    with c5: sort_order = st.radio("排序方式", ["由高至低", "由低至高"], horizontal=True, key="i_order")
-
-                    filtered_item = apply_custom_filters(edited_item, scope, type_f, skill)
-                    filtered_item = sort_custom_df(filtered_item, sort_by, sort_order)
-
-                    st.subheader("📋 分析結果")
-                    st.dataframe(filtered_item, use_container_width=True, hide_index=True)
-                    st.download_button(
-                        "📥 下載 Excel",
-                        convert_df_to_excel(filtered_item, "Custom Item Analysis"),
-                        f"{global_file.name.replace('.pdf', '')}_CustomItem.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_ci", type="primary"
-                    )
-            except Exception as e:
-                st.error(f"❌ 錯誤：{str(e)}")
-
-# -----------------
-# 標籤頁 4 的內容 / Tab 4 Content (自定義MCQ分析)
-# -----------------
-with tab4:
-    st.subheader("🎯 自定義MCQ分析 | Custom MCQ Analysis")
-    if global_file is None:
-        st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
-    else:
-        with st.spinner("正在載入數據..."):
-            try:
-                global_file.seek(0)
-                df_mcq_custom = extract_mcq_analysis(global_file)
-                if df_mcq_custom.empty:
-                    st.error("❌ 無法提取數據！請確認 PDF 包含「MCQ分析報告」。")
-                else:
-                    df_mcq_custom = prepare_mcq_analysis_for_custom(df_mcq_custom)
-
-                    st.info("✏️ **Step 1：自定義分類** - 請直接在下表的「考試範圍」、「題目類型」與「測試技能」點擊輸入。")
-                    editable = ["考試範圍", "題目類型", "測試技能"]
-                    disabled = [c for c in df_mcq_custom.columns if c not in editable]
-
-                    edited_mcq = st.data_editor(
-                        df_mcq_custom, disabled=disabled,
-                        use_container_width=True, hide_index=True, key="mcq_editor"
-                    )
-
-                    st.markdown("---")
-                    st.info("🔍 **Step 2：篩選與高亮分析**")
-                    c1, c2, c3 = st.columns(3)
-                    with c1: scope_m = st.multiselect("考試範圍", [x for x in edited_mcq["考試範圍"].unique() if x], key="m_scope")
-                    with c2: type_m = st.multiselect("題目類型", [x for x in edited_mcq["題目類型"].unique() if x], key="m_type")
-                    with c3: skill_m = st.multiselect("測試技能", [x for x in edited_mcq["測試技能"].unique() if x], key="m_skill")
-
-                    filtered_mcq = apply_custom_filters(edited_mcq, scope_m, type_m, skill_m)
-
-                    st.markdown('''
-                    <div style='background-color:#f8f9fa; padding:12px; border-radius:8px; margin-bottom:12px;'>
-                        <b>🎨 顏色說明：</b><br>
-                        <span style='background-color:#fff2cc; padding:2px 6px;'>黃色</span>：Your school 最高票選項 ≠ Corr. Ans<br>
-                        <span style='background-color:#cce5ff; padding:2px 6px;'>藍色</span>：Your school 最高票選項 ≠ Day schools 最高票選項<br>
-                        <span style='background-color:#f8d7da; padding:2px 6px;'>紅色</span>：以上兩者同時成立
-                    </div>
-                    ''', unsafe_allow_html=True)
-
-                    st.subheader("📋 分析結果")
-                    st.dataframe(filtered_mcq.style.apply(highlight_mcq_row, axis=1), use_container_width=True, hide_index=True)
-                    st.download_button(
-                        "📥 下載 Excel",
-                        convert_df_to_excel(filtered_mcq, "Custom MCQ Analysis"),
-                        f"{global_file.name.replace('.pdf', '')}_CustomMCQ.xlsx",
-                        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="btn_cm", type="primary"
-                    )
-            except Exception as e:
-                st.error(f"❌ 錯誤：{str(e)}")
-
-
 # ==========================================
 # 頁尾提示 / Footer Notes
 # ==========================================
+
+# ==========================================
+# 輔助函數與狀態：自定義分析區 (模塊二)
+# ==========================================
+if "custom_cols" not in st.session_state:
+    st.session_state.custom_cols = []
+if "col_options_history" not in st.session_state:
+    st.session_state.col_options_history = {} # 記錄 {欄位名稱: [選項1, 選項2]}
+if "item_custom_values" not in st.session_state:
+    st.session_state.item_custom_values = {} # 記錄 Item 分析的自定義值
+if "mcq_custom_values" not in st.session_state:
+    st.session_state.mcq_custom_values = {} # 記錄 MCQ 分析的自定義值
+
+def prepare_mcq_analysis_for_custom(df):
+    df = df.copy()
+    def get_top_option(row, prefix):
+        opts = {
+            "A": row.get(f"{prefix} A_No.", 0),
+            "B": row.get(f"{prefix} B_No.", 0),
+            "C": row.get(f"{prefix} C_No.", 0),
+            "D": row.get(f"{prefix} D_No.", 0),
+        }
+        for k in opts:
+            try:
+                opts[k] = float(opts[k])
+            except:
+                opts[k] = 0
+        return max(opts, key=opts.get)
+
+    df["Your school Top Option"] = df.apply(lambda r: get_top_option(r, "Your school"), axis=1)
+    df["Day schools Top Option"] = df.apply(lambda r: get_top_option(r, "Day schools"), axis=1)
+    return df
+
+def highlight_mcq_row(row):
+    your_top = str(row.get("Your school Top Option", "")).strip()
+    day_top = str(row.get("Day schools Top Option", "")).strip()
+    corr_ans = str(row.get("Corr. Ans", "")).replace("☑️", "").strip()
+
+    cond1 = (your_top != corr_ans)
+    cond2 = (your_top != day_top)
+
+    if cond1 and cond2:
+        return ["background-color: #f8d7da"] * len(row)
+    elif cond1:
+        return ["background-color: #fff3cd"] * len(row)
+    elif cond2:
+        return ["background-color: #d1ecf1"] * len(row)
+    else:
+        return [""] * len(row)
+
+# -----------------
+# 標籤頁 3: 自定義項目分析
+# -----------------
+with tab3:
+    st.subheader("📌 自定義項目分析")
+    if global_file is None:
+        st.warning("👆 請先在上載 PDF 檔案")
+    else:
+        try:
+            global_file.seek(0)
+            df_item_c = extract_item_analysis(global_file)
+            if not df_item_c.empty:
+                if "題號" not in df_item_c.columns:
+                    df_item_c.insert(0, "題號", df_item_c.get("Item", range(1, len(df_item_c) + 1)))
+
+                st.info("Step 1：建立自定義欄位 (最多 6 個)")
+                c1, c2 = st.columns([3, 1])
+                with c1:
+                    new_col = st.text_input("輸入新自定義欄位名稱：", key="new_col_input_item")
+                with c2:
+                    st.write("")
+                    st.write("")
+                    if st.button("➕ 新增欄位", key="add_col_btn_item"):
+                        if new_col and new_col not in st.session_state.custom_cols and len(st.session_state.custom_cols) < 6:
+                            st.session_state.custom_cols.append(new_col)
+                            st.session_state.col_options_history[new_col] = []
+                            st.rerun()
+
+                if st.session_state.custom_cols:
+                    st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
+
+                    st.markdown("---")
+                    st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+
+                    # 選擇題號
+                    questions = df_item_c["題號"].tolist()
+                    sel_q = st.selectbox("選擇要輸入標籤的題號：", questions, key="item_q_sel")
+
+                    # 獲取該題目前的輸入值
+                    current_values = st.session_state.item_custom_values.get(sel_q, {})
+
+                    with st.container():
+                        st.write(f"**正在編輯：第 {sel_q} 題**")
+
+                        input_results = {}
+                        for col in st.session_state.custom_cols:
+                            history_opts = st.session_state.col_options_history.get(col, [])
+                            options = [""] + history_opts + ["➕ 輸入新文本..."]
+
+                            default_idx = 0
+                            curr_val = current_values.get(col, "")
+                            if curr_val in options:
+                                default_idx = options.index(curr_val)
+
+                            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_item_{col}")
+
+                            if sel_val == "➕ 輸入新文本...":
+                                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_item_{col}")
+                                input_results[col] = new_val
+                            else:
+                                input_results[col] = sel_val
+
+                        submit_btn = st.button("📥 儲存設定", key=f"save_item_{sel_q}")
+                        if submit_btn:
+                            if sel_q not in st.session_state.item_custom_values:
+                                st.session_state.item_custom_values[sel_q] = {}
+
+                            for col, val in input_results.items():
+                                if val:
+                                    st.session_state.item_custom_values[sel_q][col] = val
+                                    if val not in st.session_state.col_options_history[col]:
+                                        st.session_state.col_options_history[col].append(val)
+
+                            st.success(f"第 {sel_q} 題設定已儲存！")
+                            st.rerun()
+
+                    # 將 session_state 裡的值套用到 dataframe 上預覽
+                    df_display = df_item_c.copy()
+                    for col in st.session_state.custom_cols:
+                        df_display[col] = df_display["題號"].apply(lambda x: st.session_state.item_custom_values.get(x, {}).get(col, ""))
+
+                    st.write("📊 **總覽表 (自動更新)：**")
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
+
+                    st.markdown("---")
+                    st.info("Step 3：篩選與排序結果")
+                    f_cols = st.columns(max(len(st.session_state.custom_cols), 1))
+                    active_filters = {}
+                    for i, col in enumerate(st.session_state.custom_cols):
+                        with f_cols[i]:
+                            u_vals = [x for x in df_display[col].unique() if str(x).strip()]
+                            active_filters[col] = st.multiselect(f"篩選 {col}", u_vals, key=f"filter_item_{col}")
+
+                    c4, c5 = st.columns([2, 1])
+                    with c4:
+                        sort_by = st.selectbox("排序依據", ["預設（按題號）", "Your school Mean %", "Day schools Mean %"], key="sort_item")
+                    with c5:
+                        sort_order = st.radio("排序方式", ["由高至低", "由低至高"], horizontal=True, key="order_item")
+
+                    final_df = df_display.copy()
+                    for col, s_filters in active_filters.items():
+                        if s_filters:
+                            final_df = final_df[final_df[col].isin(s_filters)]
+
+                    if sort_by != "預設（按題號）":
+                        try:
+                            final_df[sort_by] = pd.to_numeric(final_df[sort_by], errors='coerce')
+                            final_df = final_df.sort_values(sort_by, ascending=(sort_order == "由低至高"))
+                        except: pass
+
+                    st.dataframe(final_df, use_container_width=True, hide_index=True)
+
+        except Exception as e:
+            st.error(f"錯誤：{str(e)}")
+
+# -----------------
+# 標籤頁 4: 自定義 MCQ 分析
+# -----------------
+with tab4:
+    st.subheader("🎯 自定義 MCQ 分析")
+    if global_file is None:
+        st.warning("👆 請先在上載 PDF 檔案")
+    else:
+        try:
+            global_file.seek(0)
+            df_mcq_c = extract_mcq_analysis(global_file)
+            if not df_mcq_c.empty:
+                df_mcq_c = prepare_mcq_analysis_for_custom(df_mcq_c)
+                if "題號" not in df_mcq_c.columns:
+                    df_mcq_c.insert(0, "題號", df_mcq_c.get("Question Number", range(1, len(df_mcq_c) + 1)))
+
+                st.info("Step 1：與 Tab 3 共用欄位名稱")
+
+                if st.session_state.custom_cols:
+                    st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
+                    st.markdown("---")
+                    st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+
+                    q_mcq = df_mcq_c["題號"].tolist()
+                    sel_q_mcq = st.selectbox("選擇要輸入標籤的題號：", q_mcq, key="mcq_q_sel")
+                    curr_vals_mcq = st.session_state.mcq_custom_values.get(sel_q_mcq, {})
+
+                    with st.container():
+                        st.write(f"**正在編輯：第 {sel_q_mcq} 題**")
+
+                        input_results_m = {}
+                        for col in st.session_state.custom_cols:
+                            history_opts = st.session_state.col_options_history.get(col, [])
+                            options = [""] + history_opts + ["➕ 輸入新文本..."]
+
+                            default_idx = 0
+                            curr_val = curr_vals_mcq.get(col, "")
+                            if curr_val in options:
+                                default_idx = options.index(curr_val)
+
+                            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_mcq_{col}")
+
+                            if sel_val == "➕ 輸入新文本...":
+                                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_mcq_{col}")
+                                input_results_m[col] = new_val
+                            else:
+                                input_results_m[col] = sel_val
+
+                        submit_btn_m = st.button("📥 儲存設定", key=f"save_mcq_{sel_q_mcq}")
+                        if submit_btn_m:
+                            if sel_q_mcq not in st.session_state.mcq_custom_values:
+                                st.session_state.mcq_custom_values[sel_q_mcq] = {}
+
+                            for col, val in input_results_m.items():
+                                if val:
+                                    st.session_state.mcq_custom_values[sel_q_mcq][col] = val
+                                    if val not in st.session_state.col_options_history[col]:
+                                        st.session_state.col_options_history[col].append(val)
+
+                            st.success(f"第 {sel_q_mcq} 題設定已儲存！")
+                            st.rerun()
+
+                    df_mcq_display = df_mcq_c.copy()
+                    for col in st.session_state.custom_cols:
+                        df_mcq_display[col] = df_mcq_display["題號"].apply(lambda x: st.session_state.mcq_custom_values.get(x, {}).get(col, ""))
+
+                    st.write("📊 **總覽表 (自動更新)：**")
+                    st.dataframe(df_mcq_display, use_container_width=True, hide_index=True)
+
+                    st.markdown("---")
+                    st.info("Step 3：篩選與高亮分析")
+                    f_cols_mcq = st.columns(max(len(st.session_state.custom_cols), 1))
+                    active_filters_mcq = {}
+                    for i, col in enumerate(st.session_state.custom_cols):
+                        with f_cols_mcq[i]:
+                            u_vals_mcq = [x for x in df_mcq_display[col].unique() if str(x).strip()]
+                            active_filters_mcq[col] = st.multiselect(f"篩選 {col}", u_vals_mcq, key=f"filter_mcq_{col}")
+
+                    final_mcq_df = df_mcq_display.copy()
+                    for col, s_filters in active_filters_mcq.items():
+                        if s_filters:
+                            final_mcq_df = final_mcq_df[final_mcq_df[col].isin(s_filters)]
+
+                    st.markdown('''
+                    <div style='background-color:#f8f9fa; padding:12px; border-radius:8px; margin-bottom:12px;'>
+                        <b>顏色說明：</b><br>
+                        <span style='background-color:#fff3cd; padding:2px 6px;'>黃色</span>：本校最高票 ≠ 正確答案<br>
+                        <span style='background-color:#d1ecf1; padding:2px 6px;'>藍色</span>：本校最高票 ≠ 全港最高票<br>
+                        <span style='background-color:#f8d7da; padding:2px 6px;'>紅色</span>：以上兩點皆成立
+                    </div>
+                    ''', unsafe_allow_html=True)
+
+                    st.dataframe(
+                        final_mcq_df.style.apply(highlight_mcq_row, axis=1),
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                else:
+                    st.warning("請先在上方 (或 Tab 3) 新增自定義欄位！")
+
+        except Exception as e:
+            st.error(f"錯誤：{str(e)}")
+
+
 st.divider()
 st.caption("""
 📌 **小貼士 Tips:** 
