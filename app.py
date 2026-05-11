@@ -1,36 +1,33 @@
+
 import streamlit as st
-import pdfplumber
 import pandas as pd
+import pdfplumber
 import re
 import io
 import os
 
 # ==========================================
-# 頁面設定 / Page Configuration
+# 設定頁面配置
 # ==========================================
-st.set_page_config(page_title="HKDSE Statistical Report Data Converter | HKDSE學校統計報告 數據轉換工具", page_icon="🔁", layout="wide")
+st.set_page_config(page_title="HKDSE Statistical Report Data Converter", page_icon="📊", layout="wide")
 
-st.title("📊 HKDSE學校統計報告 數據轉換工具")
-st.markdown("本工具將自動提取考評局 PDF 報告中的數據，轉換為 Excel 格式，方便貼上至 CUHK QSIP 分析工具。")
+st.title("📊 HKDSE 統計報告數據轉換器")
+st.markdown("這是一個將考評局發佈的 PDF 報告轉換為 Excel 數據表的工具，方便直接貼入 CUHK QSIP 的分析表內。")
 
-# ==========================================
-# 頂部：共用上傳區 / Top: Global Upload
-# ==========================================
 st.markdown("---")
-st.subheader("📂 1. 上載檔案 | Upload File")
-global_file = st.file_uploader("請上載包含學校成績數據的考評局 PDF 報告", type=["pdf"], key="global_file")
-st.caption("🛡️ 本工具僅在記憶體中暫存 PDF，處理後立即刪除，不會儲存至硬碟或雲端。")
+st.subheader("1️⃣ 上傳檔案 | Upload File")
+global_file = st.file_uploader("請上傳需要轉換的 PDF 檔案", type=["pdf"], key="global_file")
+st.caption("⚠️ 支援的檔案類型：考評局下發的 PDF 報告。")
+
 st.markdown("---")
-st.subheader("📊 2. 選擇分析模式 | Select Analysis Mode")
+st.subheader("2️⃣ 選擇分析模式 | Select Analysis Mode")
 
 # ==========================================
-# 核心處理函數 1：項目分析報告 (Item Analysis)
+# 提取函數
 # ==========================================
 @st.cache_data
 def extract_item_analysis(file_bytes):
-    row_pattern = re.compile(
-        r'^(.*?)\s+(\d+)\s+(\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+%)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+\.\d+)\s+(\d+%)\s+(\d+\.\d+)\s*([+-]?\d+\.\d+)\s*'
-    )
+    row_pattern = re.compile(r'^\s*\d+\s+.*?\d+\.\d+\s+\d+\.\d+\s*$')
     extracted_data = []
 
     with pdfplumber.open(file_bytes) as pdf:
@@ -40,41 +37,33 @@ def extract_item_analysis(file_bytes):
                 continue
 
             for line in text.split('\n'):
-                clean_line = " ".join(line.split())
+                clean_line = ' '.join(line.split())
                 match = row_pattern.search(clean_line)
+
                 if match:
-                    extracted_data.append(match.groups()[:11])
+                    extracted_data.append(match.group().split())
 
     columns = [
-        "Item", "Max Mark", "Your school Attm. No.", 
-        "Your school Attem.  %", "Your school Mean", "Your school Mean %", 
-        "Your school SD", "Day schools Attem.  %", "Day schools Mean", 
-        "Day schools Mean %", "Day schools SD"
+        'Item', 'Max Mark', 
+        'Your school Attm. No.', 'Your school Attem. %', 'Your school Mean', 'Your school Mean %', 'Your school SD',
+        'Day schools Attem. %', 'Day schools Mean', 'Day schools Mean %', 'Day schools SD'
     ]
     df = pd.DataFrame(extracted_data, columns=columns)
 
-    numeric_cols = [
-        "Max Mark", "Your school Attm. No.",
-        "Your school Attem.  %", "Your school Mean", "Your school SD", 
-        "Day schools Attem.  %", "Day schools Mean", "Day schools SD"
-    ]
-
+    numeric_cols = ['Max Mark', 'Your school Attm. No.', 'Your school Attem. %', 'Your school Mean', 'Your school SD',
+                    'Day schools Attem. %', 'Day schools Mean', 'Day schools SD']
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
 
-    pct_cols = ["Your school Mean %", "Day schools Mean %"]
+    pct_cols = ['Your school Mean %', 'Day schools Mean %']
     for col in pct_cols:
         df[col] = df[col].str.replace('%', '').astype(float) / 100
 
     return df
 
-# ==========================================
-# 核心處理函數 2：多項選擇題報告 (MCQ Analysis)
-# ==========================================
 @st.cache_data
 def extract_mcq_analysis(file_bytes):
     mcq_data = []
-
     with pdfplumber.open(file_bytes) as pdf:
         for page in pdf.pages:
             text = page.extract_text()
@@ -87,24 +76,26 @@ def extract_mcq_analysis(file_bytes):
             question_answers = {}
 
             for line in lines:
-                q_match = re.match(r'^(\d+\([ivx]+\)|\d+)\s+貴校', line.strip())
+                q_match = re.match(r'^(\d+)\s*\(v\)\s*x', line.strip())
                 if q_match:
                     if current_question and question_answers:
-                        row = {'Question Number': current_question, 'Corr. Ans': correct_answer}
+                        row = {
+                            'Question Number': current_question,
+                            'Corr. Ans': correct_answer
+                        }
                         for opt in ['A', 'B', 'C', 'D']:
-                            row[f'Your school {opt}_No.'] = question_answers.get(f'{opt}_your', '0')
-                            row[f'Day schools {opt}_No.'] = question_answers.get(f'{opt}_day', '0')
+                            row[f'Your school {opt}_No.'] = question_answers.get(f'{opt}_your', 0)
+                            row[f'Day schools {opt}_No.'] = question_answers.get(f'{opt}_day', 0)
                         mcq_data.append(row)
 
                     current_question = q_match.group(1)
                     question_answers = {}
                     correct_answer = None
 
-                answer_match = re.match(r'^([ABCD])\s+()?\s*(\d+)\s+[\d.]+\s+([\d,]+)', line.strip())
+                answer_match = re.match(r'^([A-D])(☑️)?\s+(\d+\.\d+)\s*,\s+(\d+\.\d+)', line.strip())
                 if answer_match and current_question:
                     option = answer_match.group(1)
                     has_marker = answer_match.group(2) is not None
-
                     your_no = answer_match.group(3)
                     day_no = answer_match.group(4).replace(',', '')
 
@@ -115,10 +106,13 @@ def extract_mcq_analysis(file_bytes):
                     question_answers[f'{option}_day'] = day_no
 
             if current_question and question_answers:
-                row = {'Question Number': current_question, 'Corr. Ans': correct_answer}
+                row = {
+                    'Question Number': current_question,
+                    'Corr. Ans': correct_answer
+                }
                 for opt in ['A', 'B', 'C', 'D']:
-                    row[f'Your school {opt}_No.'] = question_answers.get(f'{opt}_your', '0')
-                    row[f'Day schools {opt}_No.'] = question_answers.get(f'{opt}_day', '0')
+                    row[f'Your school {opt}_No.'] = question_answers.get(f'{opt}_your', 0)
+                    row[f'Day schools {opt}_No.'] = question_answers.get(f'{opt}_day', 0)
                 mcq_data.append(row)
 
     df = pd.DataFrame(mcq_data)
@@ -136,15 +130,12 @@ def extract_mcq_analysis(file_bytes):
 
     return df
 
-# ==========================================
-# 核心處理函數 3：總數分析 (Total Analysis)
-# ==========================================
 @st.cache_data
 def extract_latest_dse_total_data(file_bytes):
-    target_grades = ['5**', '5*+', '5+', '4+', '3+', '2+', '1+', 'UNCL', '出席 Sat']
+    target_grades = ['5**', '5*', '5', '4', '3', '2', '1', 'UNCL', 'Sat']
     results = []
-    subject_name = "未知科目"
-    exam_year = "未知年份"
+    subject_name = ""
+    exam_year = ""
 
     with pdfplumber.open(file_bytes) as pdf:
         for page in pdf.pages:
@@ -152,59 +143,53 @@ def extract_latest_dse_total_data(file_bytes):
             if not text:
                 continue
 
-            if "總數" in text and "貴校" in text and "5**" in text:
+            if '香港考試及評核局' in text and '統計報告' in text and '5**' in text:
                 lines = text.split('\n')
                 in_total_section = False
 
                 for i, line in enumerate(lines):
-                    if "HKDSE 20" in line and exam_year == "未知年份":
-                        exam_year = line.replace("HKDSE", "").strip()
+                    if 'HKDSE 20' in line and not exam_year:
+                        exam_year = line.replace('HKDSE', '').strip()
 
-                for i, line in enumerate(lines):
-                    if ("總數 Total" in line or "總數" in line) and subject_name == "未知科目":
-                        if i >= 2 and "Category" not in lines[i-2] and "學科" not in lines[i-2] and "results" not in lines[i-2]:
-                            subject_name = lines[i-2].strip()
-                        elif i >= 1:
-                            subject_name = lines[i-1].strip()
+                    for i, line in enumerate(lines):
+                        if 'Total' in line or '總數' in line and not subject_name:
+                            if i >= 2 and 'Category' not in lines[i-2] and '甲類' not in lines[i-2] and not results:
+                                subject_name = lines[i-2].strip()
+                            elif i >= 1:
+                                subject_name = lines[i-1].strip()
 
-                for line in lines:
-                    if "總數 Total" in line or "總數" in line:
-                        in_total_section = True
-                    elif "男生 Male" in line or "女生 Female" in line:
-                        in_total_section = False
+                    for line in lines:
+                        if 'Total' in line or '總數' in line:
+                            in_total_section = True
+                        elif 'Male' in line or 'Female' in line:
+                            in_total_section = False
 
-                    if in_total_section:
-                        clean_line = line.replace(',', '')
-                        for grade in target_grades:
-                            if clean_line.startswith(grade + " "):
-                                parts = clean_line.split(grade)
+                        if in_total_section:
+                            clean_line = line.replace(',', '')
 
-                                if len(parts) >= 3:
-                                    ys_numbers = parts[1].strip().split()
-                                    ds_numbers = parts[2].strip().split()
+                            for grade in target_grades:
+                                if clean_line.startswith(grade):
+                                    parts = clean_line.split(grade)
+                                    if len(parts) >= 3:
+                                        ys_numbers = parts[1].strip().split()
+                                        ds_numbers = parts[2].strip().split()
 
-                                    if ys_numbers and ds_numbers:
-                                        if not any(r['等級'] == grade for r in results):
-                                            results.append({
-                                                '等級': grade,
-                                                '貴校': int(ys_numbers[-1]),
-                                                '日校': int(ds_numbers[-1])
-                                            })
-                                break
+                                        if ys_numbers and ds_numbers:
+                                            if not any(r[0] == grade for r in results):
+                                                results.append((grade, int(ys_numbers[-1]), int(ds_numbers[-1])))
+                                                break
 
                 if len(results) == len(target_grades):
                     break
 
-    df = pd.DataFrame(results)
+    df = pd.DataFrame(results, columns=['等級', 'Your school (Cum. %)', 'Day schools (Cum. %)'])
+
     if not df.empty:
         df['等級'] = pd.Categorical(df['等級'], categories=target_grades, ordered=True)
         df = df.sort_values('等級').reset_index(drop=True)
 
     return df, subject_name, exam_year
 
-# ==========================================
-# 輔助函數：匯出 Excel / Export to Excel
-# ==========================================
 def convert_df_to_excel(df, sheet_name):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -212,164 +197,7 @@ def convert_df_to_excel(df, sheet_name):
     return output.getvalue()
 
 # ==========================================
-# 建立主畫面三個標籤頁 (Tabs) 入口
-# ==========================================
-tab0, tab1, tab2, tab3, tab4 = st.tabs(["📊 總數分析 Total Analysis", "📝 項目分析報告 Item Analysis Report", "✅ 多項選擇題報告 MCQ Analysis Report", "📌 自定義項目分析", "🎯 自定義MCQ分析"])
-
-# -----------------
-# 標籤頁 0 的內容 / Tab 0 Content
-# -----------------
-with tab0:
-    st.subheader("📊 總數轉換 | Total Analysis Converter")
-
-    col_t1, col_t2 = st.columns([2, 5])
-
-    with col_t1:
-        st.info("""
-        💡 **本區功能：**
-        自動提取最新年份的「總數」數據。
-
-        **Function:**
-        Automatically extracts the latest year's 'Total' data.
-        """)
-        if os.path.exists("example3_main.png"):
-            st.image("example3_main.png", caption="總數表格示例 | Example of Total Table", use_column_width=True)
-        else:
-            st.warning("⚠️ (提示: 系統未找到 example3_main.png | Image not found)")
-
-    with col_t2:
-        if global_file is None:
-            st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
-        else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_total, subject_name, exam_year = extract_latest_dse_total_data(global_file)
-                    if df_total.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的 PDF 包含「總數」表格。")
-                    else:
-                        st.success(f"✅ 提取成功！已取得 {exam_year} 年數據。")
-
-                        st.subheader(f"📋 {subject_name} {exam_year} 數據概覽 | Data Preview")
-                        with st.expander("✂️ 快速複製單列數據 (貼上至 Excel) | Quick Copy Columns"):
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.caption("貴校人數 (Your school)")
-                                ys_text = "\n".join(df_total["貴校"].astype(str).tolist())
-                                st.code(ys_text, language="text")
-                            with c2:
-                                st.caption("日校人數 (Day schools)")
-                                ds_text = "\n".join(df_total["日校"].astype(str).tolist())
-                                st.code(ds_text, language="text")
-
-                        st.table(df_total.style.format(precision=2))
-
-
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
-
-# -----------------
-# 標籤頁 1 的內容 / Tab 1 Content
-# -----------------
-with tab1:
-    st.subheader("📝 項目分析報告轉換 | Item Analysis Converter")
-
-    col1, col2 = st.columns([2, 5])
-
-    with col1:
-        st.info("""
-        💡 **本區適用於以下格式的報告：**
-        表格橫向列出「平均分 Mean」、「標準差 S.D.」等數據。
-
-        **Applicable for reports formatted like:**
-        The table horizontally displays data such as 'Mean' and 'S.D.'.
-        """)
-        if os.path.exists("example1_item.png"):
-            st.image("example1_item.png", caption="項目分析表格示例 | Example of Item Analysis Table", use_column_width=True)
-        else:
-            st.warning("⚠️ (提示: 系統未找到 example1_item.png | Image not found)")
-
-    with col2:
-        if global_file is None:
-            st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
-        else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_item = extract_item_analysis(global_file)
-                    if df_item.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的是否為正確的「項目分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'Item Analysis Report'.*")
-                    else:
-                        st.success(f"✅ 提取成功！共獲取 {len(df_item)} 行數據。 \n *Extraction successful! {len(df_item)} rows retrieved.*")
-
-                        st.subheader("📋 數據概覽 | Data Preview")
-                        st.table(df_item.style.format(precision=2))
-
-                        st.download_button(
-                            label="📥 下載 Excel 檔案 | Download Excel File",
-                            data=convert_df_to_excel(df_item, "Item Analysis"),
-                            file_name=f"{global_file.name.replace('.pdf', '')}_ItemAnalysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="btn_item",
-                            type="primary"
-                        )
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
-
-# -----------------
-# 標籤頁 2 的內容 / Tab 2 Content
-# -----------------
-with tab2:
-    st.subheader("✅ 多項選擇題報告轉換 | MCQ Analysis Converter")
-
-    col3, col4 = st.columns([2, 5])
-
-    with col3:
-        st.info("""
-        💡 **本區適用於以下格式的報告：**
-        表格列出「A, B, C, D」選項的選擇人數，並附有 ☑️ 標記顯示正確答案。
-
-        **Applicable for reports formatted like:**
-        The table lists the number of students for options 'A, B, C, D' and uses a ☑️ mark to indicate the correct answer.
-        """)
-        if os.path.exists("example2_mcq.png"):
-            st.image("example2_mcq.png", caption="多項選擇題表格示例 | Example of MCQ Analysis Table", use_column_width=True)
-        else:
-            st.warning("⚠️ (提示: 系統未找到 example2_mcq.png | Image not found)")
-
-    with col4:
-        if global_file is None:
-            st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
-        else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_mcq = extract_mcq_analysis(global_file)
-                    if df_mcq.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的是否為正確的「多項選擇題分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'MCQ Analysis Report'.*")
-                    else:
-                        st.success(f"✅ 提取成功！共獲取 {len(df_mcq)} 題的數據。 \n *Extraction successful! Data for {len(df_mcq)} questions retrieved. *")
-
-                        st.subheader("📋 數據概覽 | Data Preview")
-                        st.table(df_mcq.style.format(precision=2))
-
-                        st.download_button(
-                            label="📥 下載 Excel 檔案 | Download Excel File",
-                            data=convert_df_to_excel(df_mcq, "MCQ Analysis"),
-                            file_name=f"{global_file.name.replace('.pdf', '')}_MCQAnalysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="btn_mcq",
-                            type="primary"
-                        )
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
-
-# ==========================================
-# 頁尾提示 / Footer Notes
-# ==========================================
-
-# ==========================================
-# 輔助函數：初始化 MCQ 數據
+# 輔助函數：MCQ 高亮與準備
 # ==========================================
 def prepare_mcq_analysis_for_custom(df):
     df = df.copy()
@@ -408,14 +236,134 @@ def highlight_mcq_row(row):
     else:
         return [""] * len(row)
 
-# ==========================================
-# 初始化自定義狀態 (輕量級)
-# ==========================================
+# 初始化外置輸入區的狀態
 if "custom_cols" not in st.session_state:
     st.session_state.custom_cols = []
+if "col_options_history" not in st.session_state:
+    st.session_state.col_options_history = {} # 記錄曾經輸入過的文本
+if "item_custom_values" not in st.session_state:
+    st.session_state.item_custom_values = {} # 記錄 {題號: {欄位: 值}}
+if "mcq_custom_values" not in st.session_state:
+    st.session_state.mcq_custom_values = {}
+
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["📊 總數分析 Total Analysis", "📝 項目分析報告 Item Analysis Report", "✅ 多項選擇題報告 MCQ Analysis Report", "📌 自定義項目分析", "🎯 自定義MCQ分析"])
 
 # -----------------
-# 標籤頁 3: 自定義項目分析
+# 標籤頁 0, 1, 2
+# -----------------
+with tab0:
+    st.subheader("📊 總數分析轉換器 | Total Analysis Converter")
+    col_t1, col_t2 = st.columns([2, 5])
+
+    with col_t1:
+        st.info("💡 適用報告：含有「5**... Sat」統計表的數據。")
+        if os.path.exists("example_3_main.png"):
+            st.image("example_3_main.png", caption="Example of Total Table", use_column_width=True)
+
+    with col_t2:
+        if global_file is None:
+            st.warning("👆 請先在上方上傳 PDF 檔案 | Please upload a PDF file above first.")
+        else:
+            with st.spinner("⏳ 正在處理檔案，請稍候..."):
+                try:
+                    global_file.seek(0)
+                    df_total, subject_name, exam_year = extract_latest_dse_total_data(global_file)
+
+                    if df_total.empty:
+                        st.error("❌ 無法提取數據！")
+                    else:
+                        st.success(f"✅ 提取成功！科目：{subject_name} ({exam_year})")
+                        st.subheader(f"📋 數據預覽")
+
+                        with st.expander("📝 點擊展開可供快速複製的欄位 | Excel Quick Copy Columns"):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.caption("Your school")
+                                ys_text = '\n'.join(df_total['Your school (Cum. %)'].astype(str).tolist())
+                                st.code(ys_text, language='text')
+                            with c2:
+                                st.caption("Day schools")
+                                ds_text = '\n'.join(df_total['Day schools (Cum. %)'].astype(str).tolist())
+                                st.code(ds_text, language='text')
+
+                        st.table(df_total.style.format(precision=2))
+                except Exception as e:
+                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+
+with tab1:
+    st.subheader("📝 項目分析轉換器 | Item Analysis Converter")
+    col1, col2 = st.columns([2, 5])
+
+    with col1:
+        st.info("💡 適用報告：橫向排列 Mean 數據的報告。")
+        if os.path.exists("example_1_item.png"):
+            st.image("example_1_item.png", caption="Example of Item Analysis Table", use_column_width=True)
+
+    with col2:
+        if global_file is None:
+            st.warning("👆 請先在上方上傳 PDF 檔案")
+        else:
+            with st.spinner("⏳ 正在處理檔案，請稍候..."):
+                try:
+                    global_file.seek(0)
+                    df_item = extract_item_analysis(global_file)
+
+                    if df_item.empty:
+                        st.error("❌ 無法提取數據！")
+                    else:
+                        st.success(f"✅ 提取成功！共取得 {len(df_item)} 題數據。")
+                        st.subheader("📋 數據預覽 | Data Preview")
+                        st.table(df_item.style.format(precision=2))
+
+                        st.download_button(
+                            label="📥 下載 Excel 檔案",
+                            data=convert_df_to_excel(df_item, "Item Analysis"),
+                            file_name=f"{global_file.name.replace('.pdf', '')}_ItemAnalysis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="btn_item",
+                            type="primary"
+                        )
+                except Exception as e:
+                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+
+with tab2:
+    st.subheader("✅ MCQ 分析轉換器 | MCQ Analysis Converter")
+    col3, col4 = st.columns([2, 5])
+
+    with col3:
+        st.info("💡 適用報告：列出 A, B, C, D 人數的報告。")
+        if os.path.exists("example_2_mcq.png"):
+            st.image("example_2_mcq.png", caption="Example of MCQ Analysis Table", use_column_width=True)
+
+    with col4:
+        if global_file is None:
+            st.warning("👆 請先在上方上傳 PDF 檔案")
+        else:
+            with st.spinner("⏳ 正在處理檔案，請稍候..."):
+                try:
+                    global_file.seek(0)
+                    df_mcq = extract_mcq_analysis(global_file)
+
+                    if df_mcq.empty:
+                        st.error("❌ 無法提取數據！")
+                    else:
+                        st.success(f"✅ 提取成功！共取得 {len(df_mcq)} 題數據。")
+                        st.subheader("📋 數據預覽 | Data Preview")
+                        st.table(df_mcq.style.format(precision=2))
+
+                        st.download_button(
+                            label="📥 下載 Excel 檔案",
+                            data=convert_df_to_excel(df_mcq, "MCQ Analysis"),
+                            file_name=f"{global_file.name.replace('.pdf', '')}_MCQAnalysis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="btn_mcq",
+                            type="primary"
+                        )
+                except Exception as e:
+                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+
+# -----------------
+# 標籤頁 3: 自定義項目分析 (外置輸入框方案)
 # -----------------
 with tab3:
     st.subheader("📌 自定義項目分析")
@@ -427,67 +375,88 @@ with tab3:
             df_item_c = extract_item_analysis(global_file)
             if not df_item_c.empty:
                 if "題號" not in df_item_c.columns:
-                    df_item_c.insert(0, "題號", df_item_c.get("Item No", range(1, len(df_item_c) + 1)))
+                    df_item_c.insert(0, "題號", df_item_c.get("Item No", df_item_c.get("Item", range(1, len(df_item_c) + 1))))
 
                 st.info("Step 1：建立與管理自定義欄位 (最多 6 個)")
                 c1, c2 = st.columns([3, 1])
                 with c1:
-                    new_col = st.text_input("輸入新自定義欄位名稱：", key="new_col_input")
+                    new_col = st.text_input("輸入新自定義欄位名稱：", key="new_col_input_item")
                 with c2:
                     st.write("")
                     st.write("")
-                    if st.button("➕ 新增欄位"):
+                    if st.button("➕ 新增欄位", key="add_col_btn_item"):
                         if new_col and new_col not in st.session_state.custom_cols and len(st.session_state.custom_cols) < 6:
                             st.session_state.custom_cols.append(new_col)
+                            st.session_state.col_options_history[new_col] = []
                             st.rerun()
 
                 if st.session_state.custom_cols:
                     st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
 
-                    # 初始化 Session state 中的 dataframe
-                    if "edited_item_df" not in st.session_state:
-                        for col in st.session_state.custom_cols:
-                            df_item_c[col] = ""
-                        st.session_state.edited_item_df = df_item_c
-                    else:
-                        # 確保新欄位有加進去
-                        for col in st.session_state.custom_cols:
-                            if col not in st.session_state.edited_item_df.columns:
-                                st.session_state.edited_item_df[col] = ""
-
                     st.markdown("---")
-                    st.info("Step 2：請直接在下方表格中輸入自定義分類 (像用 Excel 一樣打字即可)")
+                    st.info("Step 2：為每一題設定分類 (外置輸入模塊)")
 
-                    # 動態生成 Column config
-                    col_config = {}
+                    # 選擇題號
+                    questions = df_item_c["題號"].tolist()
+                    sel_q = st.selectbox("選擇要輸入標籤的題號：", questions, key="item_q_sel")
+
+                    # 獲取該題目前的輸入值
+                    current_values = st.session_state.item_custom_values.get(sel_q, {})
+
+                    with st.form(f"item_input_form_{sel_q}"):
+                        st.write(f"**正在編輯：第 {sel_q} 題**")
+
+                        input_results = {}
+                        for col in st.session_state.custom_cols:
+                            # 合併歷史記錄與新增選項
+                            history_opts = st.session_state.col_options_history.get(col, [])
+                            options = [""] + history_opts + ["➕ 輸入新文本..."]
+
+                            # 預設選中現有值
+                            default_idx = 0
+                            curr_val = current_values.get(col, "")
+                            if curr_val in options:
+                                default_idx = options.index(curr_val)
+
+                            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_{col}")
+
+                            # 如果選擇了新增文本
+                            if sel_val == "➕ 輸入新文本...":
+                                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_{col}")
+                                input_results[col] = new_val
+                            else:
+                                input_results[col] = sel_val
+
+                        submit_btn = st.form_submit_button("📥 儲存並寫入表格")
+                        if submit_btn:
+                            if sel_q not in st.session_state.item_custom_values:
+                                st.session_state.item_custom_values[sel_q] = {}
+
+                            for col, val in input_results.items():
+                                if val:
+                                    st.session_state.item_custom_values[sel_q][col] = val
+                                    # 記錄歷史文本
+                                    if val not in st.session_state.col_options_history[col]:
+                                        st.session_state.col_options_history[col].append(val)
+
+                            st.success(f"第 {sel_q} 題資料已成功寫入表格！歷史文本已記錄。")
+                            st.rerun()
+
+                    # 將 session_state 裡的值套用到 dataframe 上預覽
+                    df_display = df_item_c.copy()
                     for col in st.session_state.custom_cols:
-                        # 抓取該欄位目前所有輸入過的不重複值，作為下拉選單提示
-                        current_vals = [x for x in st.session_state.edited_item_df[col].unique() if str(x).strip()]
-                        col_config[col] = st.column_config.SelectboxColumn(
-                            col,
-                            help=f"請輸入或選擇 {col}",
-                            options=current_vals,
-                            required=False
-                        )
+                        df_display[col] = df_display["題號"].apply(lambda x: st.session_state.item_custom_values.get(x, {}).get(col, ""))
 
-                    disabled_cols = [c for c in st.session_state.edited_item_df.columns if c not in st.session_state.custom_cols]
-
-                    st.session_state.edited_item_df = st.data_editor(
-                        st.session_state.edited_item_df,
-                        disabled=disabled_cols,
-                        column_config=col_config,
-                        use_container_width=True,
-                        hide_index=True,
-                        key="item_editor_widget"
-                    )
+                    st.write("📊 **目前各題分類總覽表：**")
+                    st.dataframe(df_display, use_container_width=True, hide_index=True)
 
                     st.markdown("---")
-                    st.info("Step 3：分析與排序結果")
+                    st.info("Step 3：篩選與排序結果")
                     f_cols = st.columns(max(len(st.session_state.custom_cols), 1))
                     active_filters = {}
                     for i, col in enumerate(st.session_state.custom_cols):
                         with f_cols[i]:
-                            u_vals = [x for x in st.session_state.edited_item_df[col].unique() if str(x).strip()]
+                            u_vals = [x for x in df_display[col].unique() if str(x).strip()]
                             active_filters[col] = st.multiselect(f"篩選 {col}", u_vals, key=f"filter_item_{col}")
 
                     c4, c5 = st.columns([2, 1])
@@ -496,7 +465,7 @@ with tab3:
                     with c5:
                         sort_order = st.radio("排序方式", ["由高至低", "由低至高"], horizontal=True, key="order_item")
 
-                    final_df = st.session_state.edited_item_df.copy()
+                    final_df = df_display.copy()
                     for col, s_filters in active_filters.items():
                         if s_filters:
                             final_df = final_df[final_df[col].isin(s_filters)]
@@ -509,11 +478,19 @@ with tab3:
 
                     st.dataframe(final_df, use_container_width=True, hide_index=True)
 
+                    st.download_button(
+                        label="📥 下載自定義項目分析 Excel",
+                        data=convert_df_to_excel(final_df, "Custom Item Analysis"),
+                        file_name="Custom_Item_Analysis.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_custom_item"
+                    )
+
         except Exception as e:
             st.error(f"錯誤：{str(e)}")
 
 # -----------------
-# 標籤頁 4: 自定義 MCQ 分析
+# 標籤頁 4: 自定義 MCQ 分析 (外置輸入框方案)
 # -----------------
 with tab4:
     st.subheader("🎯 自定義 MCQ 分析")
@@ -526,48 +503,69 @@ with tab4:
             if not df_mcq_c.empty:
                 df_mcq_c = prepare_mcq_analysis_for_custom(df_mcq_c)
                 if "題號" not in df_mcq_c.columns:
-                    df_mcq_c.insert(0, "題號", df_mcq_c.get("Item No", range(1, len(df_mcq_c) + 1)))
+                    df_mcq_c.insert(0, "題號", df_mcq_c.get("Question Number", range(1, len(df_mcq_c) + 1)))
 
                 st.info("Step 1：與 Tab 3 共用欄位名稱")
 
                 if st.session_state.custom_cols:
-                    if "edited_mcq_df" not in st.session_state:
-                        for col in st.session_state.custom_cols:
-                            df_mcq_c[col] = ""
-                        st.session_state.edited_mcq_df = df_mcq_c
-                    else:
-                        for col in st.session_state.custom_cols:
-                            if col not in st.session_state.edited_mcq_df.columns:
-                                st.session_state.edited_mcq_df[col] = ""
+                    st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
 
                     st.markdown("---")
-                    st.info("Step 2：請直接在下方表格中輸入自定義分類")
+                    st.info("Step 2：為每一題設定分類 (外置輸入模塊)")
 
-                    mcq_col_config = {}
+                    # 選擇題號
+                    q_mcq = df_mcq_c["題號"].tolist()
+                    sel_q_mcq = st.selectbox("選擇要輸入標籤的題號：", q_mcq, key="mcq_q_sel")
+
+                    # 獲取該題目前的輸入值
+                    curr_vals_mcq = st.session_state.mcq_custom_values.get(sel_q_mcq, {})
+
+                    with st.form(f"mcq_input_form_{sel_q_mcq}"):
+                        st.write(f"**正在編輯：第 {sel_q_mcq} 題**")
+
+                        input_results_m = {}
+                        for col in st.session_state.custom_cols:
+                            # 合併歷史記錄與新增選項
+                            history_opts = st.session_state.col_options_history.get(col, [])
+                            options = [""] + history_opts + ["➕ 輸入新文本..."]
+
+                            # 預設選中現有值
+                            default_idx = 0
+                            curr_val = curr_vals_mcq.get(col, "")
+                            if curr_val in options:
+                                default_idx = options.index(curr_val)
+
+                            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_mcq_{col}")
+
+                            # 如果選擇了新增文本
+                            if sel_val == "➕ 輸入新文本...":
+                                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_mcq_{col}")
+                                input_results_m[col] = new_val
+                            else:
+                                input_results_m[col] = sel_val
+
+                        submit_btn_m = st.form_submit_button("📥 儲存並寫入表格")
+                        if submit_btn_m:
+                            if sel_q_mcq not in st.session_state.mcq_custom_values:
+                                st.session_state.mcq_custom_values[sel_q_mcq] = {}
+
+                            for col, val in input_results_m.items():
+                                if val:
+                                    st.session_state.mcq_custom_values[sel_q_mcq][col] = val
+                                    # 記錄歷史文本
+                                    if val not in st.session_state.col_options_history[col]:
+                                        st.session_state.col_options_history[col].append(val)
+
+                            st.success(f"第 {sel_q_mcq} 題資料已成功寫入表格！歷史文本已記錄。")
+                            st.rerun()
+
+                    # 將 session_state 裡的值套用到 dataframe 上預覽
+                    df_mcq_display = df_mcq_c.copy()
                     for col in st.session_state.custom_cols:
-                        current_vals = [x for x in st.session_state.edited_mcq_df[col].unique() if str(x).strip()]
-                        # 結合 Item 標籤頁的選項，讓兩個標籤頁的選項互通
-                        if "edited_item_df" in st.session_state:
-                            item_vals = [x for x in st.session_state.edited_item_df[col].unique() if str(x).strip()]
-                            current_vals = list(set(current_vals + item_vals))
+                        df_mcq_display[col] = df_mcq_display["題號"].apply(lambda x: st.session_state.mcq_custom_values.get(x, {}).get(col, ""))
 
-                        mcq_col_config[col] = st.column_config.SelectboxColumn(
-                            col,
-                            help=f"請輸入或選擇 {col}",
-                            options=current_vals,
-                            required=False
-                        )
-
-                    disabled_mcq_cols = [c for c in st.session_state.edited_mcq_df.columns if c not in st.session_state.custom_cols]
-
-                    st.session_state.edited_mcq_df = st.data_editor(
-                        st.session_state.edited_mcq_df,
-                        disabled=disabled_mcq_cols,
-                        column_config=mcq_col_config,
-                        use_container_width=True,
-                        hide_index=True,
-                        key="mcq_editor_widget"
-                    )
+                    st.write("📊 **目前各題分類總覽表：**")
+                    st.dataframe(df_mcq_display, use_container_width=True, hide_index=True)
 
                     st.markdown("---")
                     st.info("Step 3：篩選與高亮分析")
@@ -575,10 +573,10 @@ with tab4:
                     active_filters_mcq = {}
                     for i, col in enumerate(st.session_state.custom_cols):
                         with f_cols_mcq[i]:
-                            u_vals_mcq = [x for x in st.session_state.edited_mcq_df[col].unique() if str(x).strip()]
+                            u_vals_mcq = [x for x in df_mcq_display[col].unique() if str(x).strip()]
                             active_filters_mcq[col] = st.multiselect(f"篩選 {col}", u_vals_mcq, key=f"filter_mcq_{col}")
 
-                    final_mcq_df = st.session_state.edited_mcq_df.copy()
+                    final_mcq_df = df_mcq_display.copy()
                     for col, s_filters in active_filters_mcq.items():
                         if s_filters:
                             final_mcq_df = final_mcq_df[final_mcq_df[col].isin(s_filters)]
@@ -597,16 +595,19 @@ with tab4:
                         use_container_width=True,
                         hide_index=True
                     )
+
+                    st.download_button(
+                        label="📥 下載自定義 MCQ 分析 Excel",
+                        data=convert_df_to_excel(final_mcq_df, "Custom MCQ Analysis"),
+                        file_name="Custom_MCQ_Analysis.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="btn_custom_mcq"
+                    )
                 else:
                     st.warning("請先在上方 (或 Tab 3) 新增自定義欄位！")
 
         except Exception as e:
             st.error(f"錯誤：{str(e)}")
 
-
 st.divider()
-st.caption("""
-📌 **小貼士 Tips:** 
-下載 Excel 後，請打開檔案，選中並複製(Ctrl+C)轉換結果，然後直接貼上(Ctrl+V)至QSIP HKDSE分析工具。 \n
-*After downloading the Excel file, please open it, select and copy (Ctrl+C) the conversion results, and then paste (Ctrl+V) them directly into the QSIP HKDSE Analysis Tool.*
-""")
+st.caption("💡 提示：導出 Excel 後可直接複製數據貼上至 QSIP 系統。")
