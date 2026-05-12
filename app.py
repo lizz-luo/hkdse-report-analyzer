@@ -8,7 +8,12 @@ import os
 # ==========================================
 # 頁面設定 / Page Configuration
 # ==========================================
-st.set_page_config(page_title="HKDSE Statistical Report Data Converter | HKDSE學校統計報告 數據轉換工具", page_icon="🔁", layout="wide")
+st.set_page_config(
+    page_title="HKDSE Statistical Report Data Converter | HKDSE學校統計報告 數據轉換工具",
+    page_icon="🔁",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 st.title("📊 HKDSE學校統計報告 數據轉換工具")
 st.markdown("本工具將自動提取考評局 PDF 報告中的數據，轉換為 Excel 格式，方便貼上至 CUHK QSIP 分析工具。")
 
