@@ -222,8 +222,9 @@ with col_nav1:
 with col_nav2:
     st.caption("完成一次前處理後，自定義項目分析與自定義 MCQ 分析會直接使用已處理好的資料。")
 
-st.page_link("pages/1_custom_item_app.py", label="📌 打開：自定義項目分析 app", icon="📌")
-st.page_link("pages/2_custom_mcq_app.py", label="🎯 打開：自定義 MCQ 分析 app", icon="🎯")
+st.info("完成一次前處理後，請從左側 Sidebar 的 Pages 選單開啟兩個獨立 app。")
+st.markdown("- 📌 自定義項目分析 app")
+st.markdown("- 🎯 自定義 MCQ 分析 app")
 
 # ==========================================
 # 建立主畫面三個標籤頁 (Tabs) 入口
