@@ -48,7 +48,7 @@ def highlight_mcq_row(row):
     else:
         return [""] * len(row)
 
-st.page_link("app202605111745_main.py", label="⬅️ 返回主 app", icon="⬅️")
+st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
 
 if "processed_mcq_df" not in st.session_state:
     st.warning("尚未找到已處理好的 MCQ 資料。請先回主 app 完成前處理。")

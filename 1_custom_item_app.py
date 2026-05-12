@@ -14,7 +14,7 @@ if "item_custom_values" not in st.session_state:
 if "mcq_custom_values" not in st.session_state:
     st.session_state.mcq_custom_values = {}
 
-st.page_link("app202605111745_main.py", label="⬅️ 返回主 app", icon="⬅️")
+st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
 
 if "processed_item_df" not in st.session_state:
     st.warning("尚未找到已處理好的項目分析資料。請先回主 app 完成前處理。")
