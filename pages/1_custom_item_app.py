@@ -1,29 +1,39 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="自定義項目分析", page_icon="📌", layout="wide")
+
+def retain_session_state():
+    for k in list(st.session_state.keys()):
+        if not str(k).startswith("FormSubmitter"):
+            st.session_state[k] = st.session_state[k]
+
+
+retain_session_state()
+
+st.set_page_config(page_title="自定義項目分析", page_icon="📌", layout="wide", initial_sidebar_state="expanded")
 st.title("📌 自定義項目分析 app")
-st.caption("此頁會讀取主 app 已處理好的資料。請先回主 app 上載 PDF，並按『處理檔案並啟用自定義分析 app』。")
+st.caption("此頁會讀取主 app 已處理好的資料。")
 
-if "custom_cols" not in st.session_state:
-    st.session_state.custom_cols = []
-if "col_options_history" not in st.session_state:
-    st.session_state.col_options_history = {}
-if "item_custom_values" not in st.session_state:
-    st.session_state.item_custom_values = {}
-if "mcq_custom_values" not in st.session_state:
-    st.session_state.mcq_custom_values = {}
+for k, v in {
+    "custom_cols": [],
+    "col_options_history": {},
+    "item_custom_values": {},
+    "mcq_custom_values": {},
+    "processed_item_df": None,
+    "source_pdf_name": None,
+}.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
-st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
+if st.session_state.source_pdf_name:
+    st.success(f"已載入主 app 保存的資料：{st.session_state.source_pdf_name}")
+else:
+    st.warning("尚未找到已處理好的資料。請先回主 app 上載 PDF。")
 
-if "processed_item_df" not in st.session_state:
-    st.warning("尚未找到已處理好的項目分析資料。請先回主 app 完成前處理。")
+if st.session_state.processed_item_df is None:
     st.stop()
 
 df_item_c = st.session_state.processed_item_df.copy()
-source_name = st.session_state.get("source_pdf_name", "未命名檔案")
-st.success(f"已載入主 app 處理完成的資料：{source_name}")
-
 if not df_item_c.empty:
     if "題號" not in df_item_c.columns:
         df_item_c.insert(0, "題號", df_item_c.get("Item", range(1, len(df_item_c) + 1)))

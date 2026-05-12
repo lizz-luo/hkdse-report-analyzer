@@ -5,27 +5,48 @@ import re
 import io
 import os
 
-# ==========================================
-# 頁面設定 / Page Configuration
-# ==========================================
+
+def retain_session_state():
+    for k in list(st.session_state.keys()):
+        if not str(k).startswith("FormSubmitter"):
+            st.session_state[k] = st.session_state[k]
+
+
+retain_session_state()
+
 st.set_page_config(
     page_title="HKDSE Statistical Report Data Converter | HKDSE學校統計報告 數據轉換工具",
     page_icon="🔁",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="expanded",
 )
+
 st.title("📊 HKDSE學校統計報告 數據轉換工具")
 st.markdown("本工具將自動提取考評局 PDF 報告中的數據，轉換為 Excel 格式，方便貼上至 CUHK QSIP 分析工具。")
 
 # ==========================================
-# 頂部：共用上傳區 / Top: Global Upload
+# Session defaults
 # ==========================================
-st.markdown("---")
-st.subheader("📂 1. 上載檔案 | Upload File")
-global_file = st.file_uploader("請上載包含學校成績數據的考評局 PDF 報告", type=["pdf"], key="global_file")
-st.caption("🛡️ 本工具僅在記憶體中暫存 PDF，處理後立即刪除，不會儲存至硬碟或雲端。")
-st.markdown("---")
-st.subheader("📊 2. 選擇分析模式 | Select Analysis Mode")
+def init_state():
+    defaults = {
+        "source_pdf_bytes": None,
+        "source_pdf_name": None,
+        "processed_item_df": None,
+        "processed_mcq_df": None,
+        "processed_total_df": None,
+        "processed_subject_name": None,
+        "processed_exam_year": None,
+        "custom_cols": [],
+        "col_options_history": {},
+        "item_custom_values": {},
+        "mcq_custom_values": {},
+    }
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
+
+
+init_state()
 
 # ==========================================
 # 核心處理函數 1：項目分析報告 (Item Analysis)
@@ -194,51 +215,61 @@ def convert_df_to_excel(df, sheet_name):
         df.to_excel(writer, index=False, sheet_name=sheet_name)
     return output.getvalue()
 
-# ==========================================
-# 把已處理數據存入 session_state，供其他 app 使用
-# ==========================================
-def cache_processed_data(uploaded_file):
-    if uploaded_file is None:
-        return False
-    file_name = uploaded_file.name
-    file_bytes = uploaded_file.getvalue()
-    st.session_state['source_pdf_name'] = file_name
-    st.session_state['source_pdf_bytes'] = file_bytes
-    st.session_state['processed_item_df'] = extract_item_analysis(io.BytesIO(file_bytes))
-    st.session_state['processed_mcq_df'] = extract_mcq_analysis(io.BytesIO(file_bytes))
+
+def process_and_store_pdf(file_bytes, file_name):
+    st.session_state.source_pdf_bytes = file_bytes
+    st.session_state.source_pdf_name = file_name
+    st.session_state.processed_item_df = extract_item_analysis(io.BytesIO(file_bytes))
+    st.session_state.processed_mcq_df = extract_mcq_analysis(io.BytesIO(file_bytes))
     total_df, subject_name, exam_year = extract_latest_dse_total_data(io.BytesIO(file_bytes))
-    st.session_state['processed_total_df'] = total_df
-    st.session_state['processed_subject_name'] = subject_name
-    st.session_state['processed_exam_year'] = exam_year
-    return True
+    st.session_state.processed_total_df = total_df
+    st.session_state.processed_subject_name = subject_name
+    st.session_state.processed_exam_year = exam_year
 
-# ==========================================
-# 導航入口：前處理完成後可跳轉到其他 app
-# ==========================================
-col_nav1, col_nav2 = st.columns(2)
-with col_nav1:
-    if st.button("🚀 處理檔案並啟用自定義分析 app", type="primary"):
-        if global_file is None:
-            st.warning("請先上載 PDF 檔案。")
-        else:
-            with st.spinner("正在處理資料並準備自定義分析 app..."):
-                cache_processed_data(global_file)
-            st.success("已完成資料處理。現在可打開下方兩個獨立 app。")
-with col_nav2:
-    st.caption("完成一次前處理後，自定義項目分析與自定義 MCQ 分析會直接使用已處理好的資料。")
 
-st.info("完成一次前處理後，請從左側 Sidebar 的 Pages 選單開啟兩個獨立 app。")
-st.markdown("- 📌 自定義項目分析 app")
-st.markdown("- 🎯 自定義 MCQ 分析 app")
+st.markdown("---")
+st.subheader("📂 1. 上載檔案 | Upload File")
+global_file = st.file_uploader("請上載包含學校成績數據的考評局 PDF 報告", type=["pdf"], key="global_file")
+st.caption("🛡️ 本工具僅在記憶體中暫存 PDF，處理後立即刪除，不會儲存至硬碟或雲端。")
+
+if global_file is not None:
+    current_bytes = global_file.getvalue()
+    current_name = global_file.name
+    if (
+        st.session_state.source_pdf_bytes is None
+        or st.session_state.source_pdf_name != current_name
+        or st.session_state.source_pdf_bytes != current_bytes
+    ):
+        with st.spinner("偵測到新檔案，正在預先處理資料..."):
+            process_and_store_pdf(current_bytes, current_name)
+        st.success(f"已載入並保存檔案：{current_name}")
+elif st.session_state.source_pdf_name:
+    st.success(f"目前已保存檔案：{st.session_state.source_pdf_name}")
+    st.info("你現在可以直接切換到其他分頁，已處理資料會沿用目前 session。")
+else:
+    st.warning("尚未上載 PDF 檔案。")
+
+st.markdown("---")
+st.subheader("📊 2. 選擇分析模式 | Select Analysis Mode")
+st.info("完成上載後，可從左側 Sidebar 的 Pages 選單進入兩個獨立 app：自定義項目分析 / 自定義 MCQ 分析。")
+
+if st.button("🗑️ 清除目前已保存的 PDF 與分析結果"):
+    for k in [
+        "source_pdf_bytes", "source_pdf_name", "processed_item_df", "processed_mcq_df",
+        "processed_total_df", "processed_subject_name", "processed_exam_year"
+    ]:
+        st.session_state[k] = None
+    st.rerun()
 
 # ==========================================
 # 建立主畫面三個標籤頁 (Tabs) 入口
 # ==========================================
-tab0, tab1, tab2 = st.tabs(["📊 總數分析 Total Analysis", "📝 項目分析報告 Item Analysis Report", "✅ 多項選擇題報告 MCQ Analysis Report"])
+tab0, tab1, tab2 = st.tabs([
+    "📊 總數分析 Total Analysis",
+    "📝 項目分析報告 Item Analysis Report",
+    "✅ 多項選擇題報告 MCQ Analysis Report"
+])
 
-# -----------------
-# 標籤頁 0 的內容 / Tab 0 Content
-# -----------------
 with tab0:
     st.subheader("📊 總數轉換 | Total Analysis Converter")
     col_t1, col_t2 = st.columns([2, 5])
@@ -248,39 +279,32 @@ with tab0:
         **Function:** Automatically extracts the latest year's 'Total' data.
         """)
         if os.path.exists("example3_main.png"):
-            st.image("example3_main.png", caption="總數表格示例 | Example of Total Table", use_column_width=True)
+            st.image("example3_main.png", caption="總數表格示例 | Example of Total Table", use_container_width=True)
         else:
             st.warning("⚠️ (提示: 系統未找到 example3_main.png | Image not found)")
     with col_t2:
-        if global_file is None:
+        df_total = st.session_state.processed_total_df
+        subject_name = st.session_state.processed_subject_name
+        exam_year = st.session_state.processed_exam_year
+        if df_total is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
+        elif df_total.empty:
+            st.error("❌ 無法提取數據！請確認你上載的 PDF 包含「總數」表格。")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_total, subject_name, exam_year = extract_latest_dse_total_data(global_file)
-                    if df_total.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的 PDF 包含「總數」表格。")
-                    else:
-                        st.success(f"✅ 提取成功！已取得 {exam_year} 年數據。")
-                        st.subheader(f"📋 {subject_name} {exam_year} 數據概覽 | Data Preview")
-                        with st.expander("✂️ 快速複製單列數據 (貼上至 Excel) | Quick Copy Columns"):
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.caption("貴校人數 (Your school)")
-                                ys_text = "\n".join(df_total["貴校"].astype(str).tolist())
-                                st.code(ys_text, language="text")
-                            with c2:
-                                st.caption("日校人數 (Day schools)")
-                                ds_text = "\n".join(df_total["日校"].astype(str).tolist())
-                                st.code(ds_text, language="text")
-                        st.table(df_total.style.format(precision=2))
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
+            st.success(f"✅ 提取成功！已取得 {exam_year} 年數據。")
+            st.subheader(f"📋 {subject_name} {exam_year} 數據概覽 | Data Preview")
+            with st.expander("✂️ 快速複製單列數據 (貼上至 Excel) | Quick Copy Columns"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.caption("貴校人數 (Your school)")
+                    ys_text = "\n".join(df_total["貴校"].astype(str).tolist())
+                    st.code(ys_text, language="text")
+                with c2:
+                    st.caption("日校人數 (Day schools)")
+                    ds_text = "\n".join(df_total["日校"].astype(str).tolist())
+                    st.code(ds_text, language="text")
+            st.table(df_total.style.format(precision=2))
 
-# -----------------
-# 標籤頁 1 的內容 / Tab 1 Content
-# -----------------
 with tab1:
     st.subheader("📝 項目分析報告轉換 | Item Analysis Converter")
     col1, col2 = st.columns([2, 5])
@@ -291,37 +315,29 @@ with tab1:
         **Applicable for reports formatted like:** The table horizontally displays data such as 'Mean' and 'S.D.'.
         """)
         if os.path.exists("example1_item.png"):
-            st.image("example1_item.png", caption="項目分析表格示例 | Example of Item Analysis Table", use_column_width=True)
+            st.image("example1_item.png", caption="項目分析表格示例 | Example of Item Analysis Table", use_container_width=True)
         else:
             st.warning("⚠️ (提示: 系統未找到 example1_item.png | Image not found)")
     with col2:
-        if global_file is None:
+        df_item = st.session_state.processed_item_df
+        if df_item is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
+        elif df_item.empty:
+            st.error("❌ 無法提取數據！請確認你上載的是否為正確的「項目分析報告」。")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_item = extract_item_analysis(global_file)
-                    if df_item.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的是否為正確的「項目分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'Item Analysis Report'.*")
-                    else:
-                        st.success(f"✅ 提取成功！共獲取 {len(df_item)} 行數據。 \n *Extraction successful! {len(df_item)} rows retrieved.*")
-                        st.subheader("📋 數據概覽 | Data Preview")
-                        st.table(df_item.style.format(precision=2))
-                        st.download_button(
-                            label="📥 下載 Excel 檔案 | Download Excel File",
-                            data=convert_df_to_excel(df_item, "Item Analysis"),
-                            file_name=f"{global_file.name.replace('.pdf', '')}_ItemAnalysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="btn_item",
-                            type="primary"
-                        )
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
+            st.success(f"✅ 提取成功！共獲取 {len(df_item)} 行數據。")
+            st.subheader("📋 數據概覽 | Data Preview")
+            st.table(df_item.style.format(precision=2))
+            file_name = (st.session_state.source_pdf_name or 'output.pdf').replace('.pdf', '')
+            st.download_button(
+                label="📥 下載 Excel 檔案 | Download Excel File",
+                data=convert_df_to_excel(df_item, "Item Analysis"),
+                file_name=f"{file_name}_ItemAnalysis.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="btn_item",
+                type="primary"
+            )
 
-# -----------------
-# 標籤頁 2 的內容 / Tab 2 Content
-# -----------------
 with tab2:
     st.subheader("✅ 多項選擇題報告轉換 | MCQ Analysis Converter")
     col3, col4 = st.columns([2, 5])
@@ -332,30 +348,25 @@ with tab2:
         **Applicable for reports formatted like:** The table lists the number of students for options 'A, B, C, D' and uses a ☑️ mark to indicate the correct answer.
         """)
         if os.path.exists("example2_mcq.png"):
-            st.image("example2_mcq.png", caption="多項選擇題表格示例 | Example of MCQ Analysis Table", use_column_width=True)
+            st.image("example2_mcq.png", caption="多項選擇題表格示例 | Example of MCQ Analysis Table", use_container_width=True)
         else:
             st.warning("⚠️ (提示: 系統未找到 example2_mcq.png | Image not found)")
     with col4:
-        if global_file is None:
+        df_mcq = st.session_state.processed_mcq_df
+        if df_mcq is None:
             st.warning("👆 請先在上方上載 PDF 檔案 | Please upload a PDF file above first.")
+        elif df_mcq.empty:
+            st.error("❌ 無法提取數據！請確認你上載的是否為正確的「多項選擇題分析報告」。")
         else:
-            with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
-                try:
-                    global_file.seek(0)
-                    df_mcq = extract_mcq_analysis(global_file)
-                    if df_mcq.empty:
-                        st.error("❌ 無法提取數據！請確認你上載的是否為正確的「多項選擇題分析報告」。 \n *Failed to extract data! Please ensure you uploaded the correct 'MCQ Analysis Report'.*")
-                    else:
-                        st.success(f"✅ 提取成功！共獲取 {len(df_mcq)} 題的數據。 \n *Extraction successful! Data for {len(df_mcq)} questions retrieved. *")
-                        st.subheader("📋 數據概覽 | Data Preview")
-                        st.table(df_mcq.style.format(precision=2))
-                        st.download_button(
-                            label="📥 下載 Excel 檔案 | Download Excel File",
-                            data=convert_df_to_excel(df_mcq, "MCQ Analysis"),
-                            file_name=f"{global_file.name.replace('.pdf', '')}_MCQAnalysis.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key="btn_mcq",
-                            type="primary"
-                        )
-                except Exception as e:
-                    st.error(f"❌ 處理檔案時發生錯誤 | Error processing file：{str(e)}")
+            st.success(f"✅ 提取成功！共獲取 {len(df_mcq)} 題的數據。")
+            st.subheader("📋 數據概覽 | Data Preview")
+            st.table(df_mcq.style.format(precision=2))
+            file_name = (st.session_state.source_pdf_name or 'output.pdf').replace('.pdf', '')
+            st.download_button(
+                label="📥 下載 Excel 檔案 | Download Excel File",
+                data=convert_df_to_excel(df_mcq, "MCQ Analysis"),
+                file_name=f"{file_name}_MCQAnalysis.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                key="btn_mcq",
+                type="primary"
+            )
