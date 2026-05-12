@@ -3,8 +3,21 @@ import pandas as pd
 
 
 def retain_session_state():
-    for k in list(st.session_state.keys()):
-        if not str(k).startswith("FormSubmitter"):
+    safe_keys = [
+        "source_pdf_bytes",
+        "source_pdf_name",
+        "processed_item_df",
+        "processed_mcq_df",
+        "processed_total_df",
+        "processed_subject_name",
+        "processed_exam_year",
+        "custom_cols",
+        "col_options_history",
+        "item_custom_values",
+        "mcq_custom_values",
+    ]
+    for k in safe_keys:
+        if k in st.session_state:
             st.session_state[k] = st.session_state[k]
 
 
