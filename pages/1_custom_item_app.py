@@ -126,21 +126,26 @@ if not df_item_c.empty:
 
                 # 下拉框與文字框始終在同一行
                 left_col, right_col = st.columns([1, 1])
-                with left_col:
-                    sel_val = st.selectbox(
-                        f"{col}:",
-                        options=options,
-                        index=default_idx,
-                        key=f"sel_item_{col}_{st.session_state.sel_input_counter}"
-                    )
+st.write(f"**{col}**")  # 統一標題放在 columns 外面（佔整行）
+# 或者放在 left_col 上方也可以
 
-                if sel_val == f"➕ 輸入新的{col}":
-                    with right_col:
-                        st.write("")  # 對齊 label 高度
-                        new_val = st.text_input(
-                            f"請在此輸入新的「{col}」:",
-                            key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
-                        )
+with left_col:
+    sel_val = st.selectbox(
+        f"{col}:",
+        options=options,
+        index=default_idx,
+        label_visibility="collapsed",  # 隱藏 label
+        key=f"sel_item_{col}_{st.session_state.sel_input_counter}"
+    )
+
+if sel_val == f"➕ 輸入新的{col}":
+    with right_col:
+        new_val = st.text_input(
+            f"請在此輸入新的「{col}」:",
+            label_visibility="collapsed",  # 隱藏 label，對齊高度
+            placeholder=f"輸入新的{col}...",
+            key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
+        )
                     input_results[col] = new_val
                 else:
                     # 右邊空白，保持佈局一致
