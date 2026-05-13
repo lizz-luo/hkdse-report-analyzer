@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 
 def retain_session_state():
@@ -21,6 +22,33 @@ def retain_session_state():
 
 retain_session_state()
 
+# ── 禁用 Streamlit 的 'c' 鍵 (Clear Cache) 快捷鍵 ──
+# 需要通過 iframe 的 window.parent 注入到主頁面 document
+components.html("""
+<script>
+(function() {
+    function blockClearCache(e) {
+        // 攔截單鍵 'c' / 'C'（Streamlit 的 clear cache 快捷鍵）
+        // 但保留 Ctrl+C / Cmd+C（正常複製）
+        if (!e.ctrlKey && !e.metaKey && !e.altKey &&
+            (e.key === 'c' || e.key === 'C')) {
+            var tag = document.activeElement ? document.activeElement.tagName : '';
+            // 只在非輸入框時攔截（避免影響正常輸入）
+            if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
+                e.stopImmediatePropagation();
+            }
+        }
+    }
+    // 注入到父頁面
+    try {
+        window.parent.document.addEventListener('keydown', blockClearCache, true);
+    } catch(err) {
+        document.addEventListener('keydown', blockClearCache, true);
+    }
+})();
+</script>
+""", height=0)
+
 st.set_page_config(page_title="自定義項目分析", page_icon="📌", layout="wide", initial_sidebar_state="expanded")
 st.title("📌 自定義項目分析 app")
 st.caption("此頁會讀取主 app 已處理好的資料。")
@@ -32,10 +60,10 @@ for k, v in {
     "mcq_custom_values": {},
     "processed_item_df": None,
     "source_pdf_name": None,
-    # 用來控制 Step 1 輸入框清空的 counter
     "new_col_input_counter": 0,
-    # 用來控制 Step 2 新增文本輸入框清空的 counter
     "new_val_input_counter": 0,
+    # 用來清空 Step 2 下拉選擇框的 counter
+    "sel_input_counter": 0,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -61,7 +89,6 @@ if not df_item_c.empty:
         st.info("Step 1：建立自定義欄位 (最多 6 個)")
         c1, c2 = st.columns([3, 1])
         with c1:
-            # 用 counter 作為 key 的一部分，每次新增成功後 counter +1，令 Streamlit 建立新的輸入框（等同清空）
             new_col = st.text_input(
                 "輸入新自定義欄位名稱：",
                 key=f"new_col_input_item_{st.session_state.new_col_input_counter}"
@@ -70,10 +97,16 @@ if not df_item_c.empty:
             st.write("")
             st.write("")
             if st.button("➕ 新增欄位", key="add_col_btn_item"):
-                if new_col and new_col not in st.session_state.custom_cols and len(st.session_state.custom_cols) < 6:
+                if len(st.session_state.custom_cols) >= 6:
+                    # 已達上限，提示用戶
+                    st.error("已達上限！最多只能建立 6 個自定義欄位。")
+                elif not new_col:
+                    st.warning("請先輸入欄位名稱。")
+                elif new_col in st.session_state.custom_cols:
+                    st.warning(f"欄位「{new_col}」已存在。")
+                else:
                     st.session_state.custom_cols.append(new_col)
                     st.session_state.col_options_history[new_col] = []
-                    # counter +1 → 下次 render 時輸入框 key 變更 → 自動清空
                     st.session_state.new_col_input_counter += 1
                     st.rerun()
 
@@ -93,18 +126,28 @@ if not df_item_c.empty:
             input_results = {}
             for col in st.session_state.custom_cols:
                 history_opts = st.session_state.col_options_history.get(col, [])
-                options = [""] + history_opts + ["➕ 輸入新文本..."]
+                options = [""] + history_opts + [f"➕ 輸入新的{col}"]
                 default_idx = 0
                 curr_val = current_values.get(col, "")
                 if curr_val in options:
                     default_idx = options.index(curr_val)
-                sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_item_{col}")
-                if sel_val == "➕ 輸入新文本...":
-                    # 同樣用 counter 控制清空
-                    new_val = st.text_input(
-                        f"請輸入新的「{col}」:",
-                        key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
-                    )
+
+                # 下拉框也用 counter 控制，儲存後清空
+                sel_val = st.selectbox(
+                    f"{col}:",
+                    options=options,
+                    index=default_idx,
+                    key=f"sel_item_{col}_{st.session_state.sel_input_counter}"
+                )
+
+                if sel_val == f"➕ 輸入新的{col}":
+                    # 文字框放在同一行右邊
+                    _, right = st.columns([1, 2])
+                    with right:
+                        new_val = st.text_input(
+                            f"請在此輸入新的「{col}」:",
+                            key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
+                        )
                     input_results[col] = new_val
                 else:
                     input_results[col] = sel_val
@@ -118,8 +161,9 @@ if not df_item_c.empty:
                         st.session_state.item_custom_values[sel_q][col] = val
                         if val not in st.session_state.col_options_history[col]:
                             st.session_state.col_options_history[col].append(val)
-                # counter +1 → 清空所有「新增文本」輸入框
+                # 同時 +1，清空下拉框與文字框
                 st.session_state.new_val_input_counter += 1
+                st.session_state.sel_input_counter += 1
                 st.success(f"第 {sel_q} 題設定已儲存！")
                 st.rerun()
 
