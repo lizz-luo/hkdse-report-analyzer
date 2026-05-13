@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 
-
 def retain_session_state():
     safe_keys = [
         "source_pdf_bytes",
@@ -20,7 +19,6 @@ def retain_session_state():
         if k in st.session_state:
             st.session_state[k] = st.session_state[k]
 
-
 retain_session_state()
 
 st.set_page_config(page_title="自定義項目分析", page_icon="📌", layout="wide", initial_sidebar_state="expanded")
@@ -34,6 +32,10 @@ for k, v in {
     "mcq_custom_values": {},
     "processed_item_df": None,
     "source_pdf_name": None,
+    # 用來控制 Step 1 輸入框清空的 counter
+    "new_col_input_counter": 0,
+    # 用來控制 Step 2 新增文本輸入框清空的 counter
+    "new_val_input_counter": 0,
 }.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -51,61 +53,82 @@ if not df_item_c.empty:
     if "題號" not in df_item_c.columns:
         df_item_c.insert(0, "題號", df_item_c.get("Item", range(1, len(df_item_c) + 1)))
 
-    st.info("Step 1：建立自定義欄位 (最多 6 個)")
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        new_col = st.text_input("輸入新自定義欄位名稱：", key="new_col_input_item")
-    with c2:
-        st.write("")
-        st.write("")
-        if st.button("➕ 新增欄位", key="add_col_btn_item"):
-            if new_col and new_col not in st.session_state.custom_cols and len(st.session_state.custom_cols) < 6:
-                st.session_state.custom_cols.append(new_col)
-                st.session_state.col_options_history[new_col] = []
+    # ── 橫屏並排：Step 1 & Step 2 ──
+    step_col1, step_col2 = st.columns([1, 1])
+
+    # ══════════════ Step 1 ══════════════
+    with step_col1:
+        st.info("Step 1：建立自定義欄位 (最多 6 個)")
+        c1, c2 = st.columns([3, 1])
+        with c1:
+            # 用 counter 作為 key 的一部分，每次新增成功後 counter +1，令 Streamlit 建立新的輸入框（等同清空）
+            new_col = st.text_input(
+                "輸入新自定義欄位名稱：",
+                key=f"new_col_input_item_{st.session_state.new_col_input_counter}"
+            )
+        with c2:
+            st.write("")
+            st.write("")
+            if st.button("➕ 新增欄位", key="add_col_btn_item"):
+                if new_col and new_col not in st.session_state.custom_cols and len(st.session_state.custom_cols) < 6:
+                    st.session_state.custom_cols.append(new_col)
+                    st.session_state.col_options_history[new_col] = []
+                    # counter +1 → 下次 render 時輸入框 key 變更 → 自動清空
+                    st.session_state.new_col_input_counter += 1
+                    st.rerun()
+
+        if st.session_state.custom_cols:
+            st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
+
+    # ══════════════ Step 2 ══════════════
+    with step_col2:
+        st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+
+        questions = df_item_c["題號"].tolist()
+        sel_q = st.selectbox("選擇要輸入標籤的題號：", questions, key="item_q_sel")
+        current_values = st.session_state.item_custom_values.get(sel_q, {})
+
+        with st.container():
+            st.write(f"**正在編輯：第 {sel_q} 題**")
+            input_results = {}
+            for col in st.session_state.custom_cols:
+                history_opts = st.session_state.col_options_history.get(col, [])
+                options = [""] + history_opts + ["➕ 輸入新文本..."]
+                default_idx = 0
+                curr_val = current_values.get(col, "")
+                if curr_val in options:
+                    default_idx = options.index(curr_val)
+                sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_item_{col}")
+                if sel_val == "➕ 輸入新文本...":
+                    # 同樣用 counter 控制清空
+                    new_val = st.text_input(
+                        f"請輸入新的「{col}」:",
+                        key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
+                    )
+                    input_results[col] = new_val
+                else:
+                    input_results[col] = sel_val
+
+            submit_btn = st.button("📥 儲存設定", key=f"save_item_{sel_q}")
+            if submit_btn:
+                if sel_q not in st.session_state.item_custom_values:
+                    st.session_state.item_custom_values[sel_q] = {}
+                for col, val in input_results.items():
+                    if val:
+                        st.session_state.item_custom_values[sel_q][col] = val
+                        if val not in st.session_state.col_options_history[col]:
+                            st.session_state.col_options_history[col].append(val)
+                # counter +1 → 清空所有「新增文本」輸入框
+                st.session_state.new_val_input_counter += 1
+                st.success(f"第 {sel_q} 題設定已儲存！")
                 st.rerun()
 
-    if st.session_state.custom_cols:
-        st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
-
-    st.markdown("---")
-    st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
-
-    questions = df_item_c["題號"].tolist()
-    sel_q = st.selectbox("選擇要輸入標籤的題號：", questions, key="item_q_sel")
-    current_values = st.session_state.item_custom_values.get(sel_q, {})
-
-    with st.container():
-        st.write(f"**正在編輯：第 {sel_q} 題**")
-        input_results = {}
-        for col in st.session_state.custom_cols:
-            history_opts = st.session_state.col_options_history.get(col, [])
-            options = [""] + history_opts + ["➕ 輸入新文本..."]
-            default_idx = 0
-            curr_val = current_values.get(col, "")
-            if curr_val in options:
-                default_idx = options.index(curr_val)
-            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_item_{col}")
-            if sel_val == "➕ 輸入新文本...":
-                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_item_{col}")
-                input_results[col] = new_val
-            else:
-                input_results[col] = sel_val
-
-        submit_btn = st.button("📥 儲存設定", key=f"save_item_{sel_q}")
-        if submit_btn:
-            if sel_q not in st.session_state.item_custom_values:
-                st.session_state.item_custom_values[sel_q] = {}
-            for col, val in input_results.items():
-                if val:
-                    st.session_state.item_custom_values[sel_q][col] = val
-                    if val not in st.session_state.col_options_history[col]:
-                        st.session_state.col_options_history[col].append(val)
-            st.success(f"第 {sel_q} 題設定已儲存！")
-            st.rerun()
-
+    # ══════════════ 總覽表 ══════════════
     df_display = df_item_c.copy()
     for col in st.session_state.custom_cols:
-        df_display[col] = df_display["題號"].apply(lambda x: st.session_state.item_custom_values.get(x, {}).get(col, ""))
+        df_display[col] = df_display["題號"].apply(
+            lambda x: st.session_state.item_custom_values.get(x, {}).get(col, "")
+        )
 
     st.write("📊 **總覽表 (自動更新)：**")
     st.dataframe(df_display, use_container_width=True, hide_index=True)
