@@ -1,7 +1,6 @@
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
-from io import BytesIO
 
 def retain_session_state():
     safe_keys = [
@@ -206,50 +205,6 @@ if not df_item_c.empty:
         except:
             pass
 
-    # --- 1. 批量調節欄寬 ---
-    wide_cols = st.multiselect("選擇要調寬的欄位 (批量變寬)：", options=final_df.columns.tolist())
-
-    col_config_dict = {}
-    for col in wide_cols:
-        col_config_dict[col] = st.column_config.Column(width="large")
-
-    # --- 2. 設定 Highlight 邏輯 ---
-    def highlight_rows(row):
-        # 預設範例：如果第一欄(Item)或特定欄位符合條件，整列上黃底。
-        # 你可以隨時修改這段邏輯，例如：if row.get("Topic") == "重點":
-        # 目前先假設如果該題目已經在自訂欄位有任何填寫，就給予一點 highlight 提示
-        has_custom = False
-        for c in st.session_state.custom_cols:
-            if pd.notna(row.get(c)) and str(row.get(c)).strip() != "":
-                has_custom = True
-                break
-
-        if has_custom:
-            return ["background-color: #FFF59D; color: black"] * len(row)
-        return [""] * len(row)
-
-    # 產生套用顏色格式的 DataFrame
-    styled_df = final_df.style.apply(highlight_rows, axis=1)
-
-    # 顯示加上欄寬設定與顏色的表格
-    st.dataframe(styled_df, use_container_width=True, hide_index=True, column_config=col_config_dict)
-
-    # --- 3. 準備並顯示帶 Highlight 的 Excel 下載按鈕 ---
-    def get_excel_with_style(styler_obj):
-        output = BytesIO()
-        # 注意: 需要安裝 openpyxl
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            styler_obj.to_excel(writer, index=False, sheet_name="Result")
-        return output.getvalue()
-
-    excel_data = get_excel_with_style(styled_df)
-
-    st.download_button(
-        label="📥 下載含 Highlight 的 Excel (xlsx)",
-        data=excel_data,
-        file_name="styled_result.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
+    st.dataframe(final_df, use_container_width=True, hide_index=True)
 else:
     st.error("找不到可用的項目分析資料。")
