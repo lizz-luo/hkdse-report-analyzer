@@ -1,43 +1,18 @@
 import streamlit as st
 import pandas as pd
 
-
-def retain_session_state():
-    safe_keys = [
-        "source_pdf_bytes",
-        "source_pdf_name",
-        "processed_item_df",
-        "processed_mcq_df",
-        "processed_total_df",
-        "processed_subject_name",
-        "processed_exam_year",
-        "custom_cols",
-        "col_options_history",
-        "item_custom_values",
-        "mcq_custom_values",
-    ]
-    for k in safe_keys:
-        if k in st.session_state:
-            st.session_state[k] = st.session_state[k]
-
-
-retain_session_state()
-
-st.set_page_config(page_title="自定義 MCQ 分析", page_icon="🎯", layout="wide", initial_sidebar_state="expanded")
+st.set_page_config(page_title="自定義 MCQ 分析", page_icon="🎯", layout="wide")
 st.title("🎯 自定義 MCQ 分析 app")
-st.caption("此頁會讀取主 app 已處理好的資料。")
+st.caption("此頁會讀取主 app 已處理好的資料。請先回主 app 上載 PDF，並按『處理檔案並啟用自定義分析 app』。")
 
-for k, v in {
-    "custom_cols": [],
-    "col_options_history": {},
-    "item_custom_values": {},
-    "mcq_custom_values": {},
-    "processed_mcq_df": None,
-    "source_pdf_name": None,
-}.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-
+if "custom_cols" not in st.session_state:
+    st.session_state.custom_cols = []
+if "col_options_history" not in st.session_state:
+    st.session_state.col_options_history = {}
+if "item_custom_values" not in st.session_state:
+    st.session_state.item_custom_values = {}
+if "mcq_custom_values" not in st.session_state:
+    st.session_state.mcq_custom_values = {}
 
 def prepare_mcq_analysis_for_custom(df):
     df = df.copy()
@@ -58,7 +33,6 @@ def prepare_mcq_analysis_for_custom(df):
     df["Day schools Top Option"] = df.apply(lambda r: get_top_option(r, "Day schools"), axis=1)
     return df
 
-
 def highlight_mcq_row(row):
     your_top = str(row.get("Your school Top Option", "")).strip()
     day_top = str(row.get("Day schools Top Option", "")).strip()
@@ -74,16 +48,16 @@ def highlight_mcq_row(row):
     else:
         return [""] * len(row)
 
+st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
 
-if st.session_state.source_pdf_name:
-    st.success(f"已載入主 app 保存的資料：{st.session_state.source_pdf_name}")
-else:
-    st.warning("尚未找到已處理好的資料。請先回主 app 上載 PDF。")
-
-if st.session_state.processed_mcq_df is None:
+if "processed_mcq_df" not in st.session_state:
+    st.warning("尚未找到已處理好的 MCQ 資料。請先回主 app 完成前處理。")
     st.stop()
 
 df_mcq_c = st.session_state.processed_mcq_df.copy()
+source_name = st.session_state.get("source_pdf_name", "未命名檔案")
+st.success(f"已載入主 app 處理完成的資料：{source_name}")
+
 if not df_mcq_c.empty:
     df_mcq_c = prepare_mcq_analysis_for_custom(df_mcq_c)
     if "題號" not in df_mcq_c.columns:
@@ -153,7 +127,9 @@ if not df_mcq_c.empty:
         if s_filters:
             final_mcq_df = final_mcq_df[final_mcq_df[col].isin(s_filters)]
 
-    st.markdown("🔍 顏色說明：紅色 = 貴校最高選項既非正答亦不同於日校；黃色 = 非正答；藍色 = 與日校最高選項不同。")
+    st.markdown("""
+    🔍 顏色說明：紅色 = 貴校最高選項既非正答亦不同於日校；黃色 = 非正答；藍色 = 與日校最高選項不同。
+    """)
     st.dataframe(final_mcq_df.style.apply(highlight_mcq_row, axis=1), use_container_width=True, hide_index=True)
 else:
     st.error("找不到可用的 MCQ 分析資料。")
