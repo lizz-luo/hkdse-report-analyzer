@@ -22,18 +22,24 @@ def retain_session_state():
 
 retain_session_state()
 
+# ── 禁用 Streamlit 的 'c' 鍵 (Clear Cache) 快捷鍵 ──
+# 需要通過 iframe 的 window.parent 注入到主頁面 document
 components.html("""
 <script>
 (function() {
     function blockClearCache(e) {
+        // 攔截單鍵 'c' / 'C'（Streamlit 的 clear cache 快捷鍵）
+        // 但保留 Ctrl+C / Cmd+C（正常複製）
         if (!e.ctrlKey && !e.metaKey && !e.altKey &&
             (e.key === 'c' || e.key === 'C')) {
             var tag = document.activeElement ? document.activeElement.tagName : '';
+            // 只在非輸入框時攔截（避免影響正常輸入）
             if (tag !== 'INPUT' && tag !== 'TEXTAREA' && tag !== 'SELECT') {
                 e.stopImmediatePropagation();
             }
         }
     }
+    // 注入到父頁面
     try {
         window.parent.document.addEventListener('keydown', blockClearCache, true);
     } catch(err) {
@@ -56,6 +62,7 @@ for k, v in {
     "source_pdf_name": None,
     "new_col_input_counter": 0,
     "new_val_input_counter": 0,
+    # 用來清空 Step 2 下拉選擇框的 counter
     "sel_input_counter": 0,
 }.items():
     if k not in st.session_state:
@@ -91,6 +98,7 @@ if not df_item_c.empty:
             st.write("")
             if st.button("➕ 新增欄位", key="add_col_btn_item"):
                 if len(st.session_state.custom_cols) >= 6:
+                    # 已達上限，提示用戶
                     st.error("已達上限！最多只能建立 6 個自定義欄位。")
                 elif not new_col:
                     st.warning("請先輸入欄位名稱。")
@@ -124,33 +132,24 @@ if not df_item_c.empty:
                 if curr_val in options:
                     default_idx = options.index(curr_val)
 
-                # 下拉框與文字框始終在同一行
-                left_col, right_col = st.columns([1, 1])
-st.write(f"**{col}**")  # 統一標題放在 columns 外面（佔整行）
-# 或者放在 left_col 上方也可以
+                # 下拉框也用 counter 控制，儲存後清空
+                sel_val = st.selectbox(
+                    f"{col}:",
+                    options=options,
+                    index=default_idx,
+                    key=f"sel_item_{col}_{st.session_state.sel_input_counter}"
+                )
 
-with left_col:
-    sel_val = st.selectbox(
-        f"{col}:",
-        options=options,
-        index=default_idx,
-        label_visibility="collapsed",  # 隱藏 label
-        key=f"sel_item_{col}_{st.session_state.sel_input_counter}"
-    )
-
-if sel_val == f"➕ 輸入新的{col}":
-    with right_col:
-        new_val = st.text_input(
-            f"請在此輸入新的「{col}」:",
-            label_visibility="collapsed",  # 隱藏 label，對齊高度
-            placeholder=f"輸入新的{col}...",
-            key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
-        )
+                if sel_val == f"➕ 輸入新的{col}":
+                    # 文字框放在同一行右邊
+                    _, right = st.columns([1, 2])
+                    with right:
+                        new_val = st.text_input(
+                            f"請在此輸入新的「{col}」:",
+                            key=f"new_val_item_{col}_{st.session_state.new_val_input_counter}"
+                        )
                     input_results[col] = new_val
                 else:
-                    # 右邊空白，保持佈局一致
-                    with right_col:
-                        st.empty()
                     input_results[col] = sel_val
 
             submit_btn = st.button("📥 儲存設定", key=f"save_item_{sel_q}")
@@ -162,6 +161,7 @@ if sel_val == f"➕ 輸入新的{col}":
                         st.session_state.item_custom_values[sel_q][col] = val
                         if val not in st.session_state.col_options_history[col]:
                             st.session_state.col_options_history[col].append(val)
+                # 同時 +1，清空下拉框與文字框
                 st.session_state.new_val_input_counter += 1
                 st.session_state.sel_input_counter += 1
                 st.success(f"第 {sel_q} 題設定已儲存！")
