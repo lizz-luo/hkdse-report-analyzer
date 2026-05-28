@@ -311,18 +311,18 @@ with tab0:
                                 chart_df = pd.concat([chart_df, uncl_chart_data], ignore_index=True)
 
                             bar = alt.Chart(chart_df).mark_bar().encode(
-                                x=alt.X("等級:N", title="等級", sort=list(df_total["等級"])),
+                                x=alt.X("等級:N", title="等級", sort=list(df_total["等級"]), axis=alt.Axis(labelFontSize=14, titleFontSize=14)),
                                 xOffset="學校類別:N",
-                                y=alt.Y("百分比:Q", title="佔出席百分比 (%)"),
+                                y=alt.Y("百分比:Q", title="佔出席百分比 (%)", axis=alt.Axis(labelFontSize=14, titleFontSize=14)),
                                 color=alt.Color(
                                     "學校類別:N",
-                                    scale=alt.Scale(domain=["貴校", "日校"], range=["#4285F4", "#EA4335"]),
+                                    scale=alt.Scale(domain=["貴校", "日校"], range=["#7BA8E0", "#FF9999"]),
                                     title="學校類別"
                                 ),
                                 tooltip=["等級", "學校類別", "累計差值", alt.Tooltip("百分比:Q", format=".1f")]
                             )
 
-                            labels = alt.Chart(chart_df).mark_text(dy=-8, color="black").encode(
+                            labels = alt.Chart(chart_df).mark_text(dy=-8, color="black", fontSize=16).encode(
                                 x=alt.X("等級:N", sort=list(df_total["等級"])),
                                 xOffset="學校類別:N",
                                 y=alt.Y("百分比:Q"),
@@ -380,7 +380,9 @@ with tab0:
                                     "日校百分比": [uncl_ds_pct]
                                 })], ignore_index=True)
                             
-                            st.dataframe(pivot_df, use_container_width=True, hide_index=True)
+                            # 轉置數據表
+                            transposed_df = pivot_df.set_index("等級").T
+                            st.dataframe(transposed_df, use_container_width=True)
                         else:
                             st.warning("⚠️ 無法計算百分比，缺少出席人數資料。")
                 except Exception as e:
