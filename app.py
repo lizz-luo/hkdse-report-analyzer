@@ -317,17 +317,6 @@ with tab0:
                     ds_text = "\n".join(df_total["日校"].astype(str).tolist())
                     st.code(ds_text, language="text")
             st.table(df_total.style.format(precision=2))
-            chart_df = df_total[df_total['等級'] != '出席 Sat'].copy()
-            chart_long = chart_df.melt(id_vars='等級', var_name='學校', value_name='人數')
-            chart = alt.Chart(chart_long).mark_bar().encode(
-                x=alt.X('等級:N', title='等級', sort=[g for g in df_total['等級'].tolist() if g != '出席 Sat']),
-                y=alt.Y('人數:Q', title='人數'),
-                color=alt.Color('學校:N', title='', scale=alt.Scale(range=['#1f77b4', '#ff7f0e'])),
-                xOffset='學校:N',
-                tooltip=['等級', '學校', '人數']
-            ).properties(height=380)
-            st.altair_chart(chart, use_container_width=True)
-
 
 with tab1:
     st.subheader("📝 項目分析報告轉換 | Item Analysis Converter")
