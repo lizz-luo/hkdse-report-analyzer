@@ -4,6 +4,7 @@ import pandas as pd
 import re
 import io
 import os
+import altair as alt
 
 
 def retain_session_state():
