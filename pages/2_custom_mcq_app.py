@@ -3,14 +3,14 @@ import streamlit as st
 
 from pdf_utils import extract_mcq_analysis
 
-st.set_page_config(page_title="自定義 MCQ 分析", page_icon="🎯", layout="wide")
+st.set_page_config(page_title="MCQ Analysis", page_icon="🎯", layout="wide")
 st.title("🎯 自定義 MCQ 分析 app")
 st.caption("此頁會讀取主 app 已處理好的資料。請先回主 app 上載 PDF，並按『處理檔案並啟用自定義分析 app』。")
 
-if "custom_cols" not in st.session_state:
-    st.session_state.custom_cols = []
-if "col_options_history" not in st.session_state:
-    st.session_state.col_options_history = {}
+if "mcq_custom_cols" not in st.session_state:
+    st.session_state.mcq_custom_cols = []
+if "mcq_col_options_history" not in st.session_state:
+    st.session_state.mcq_col_options_history = {}
 if "item_custom_values" not in st.session_state:
     st.session_state.item_custom_values = {}
 if "mcq_custom_values" not in st.session_state:
@@ -70,50 +70,65 @@ if not df_mcq_c.empty:
     if "題號" not in df_mcq_c.columns:
         df_mcq_c.insert(0, "題號", df_mcq_c.get("Question Number", range(1, len(df_mcq_c) + 1)))
 
-    st.info("Step 1：與自定義項目分析 app 共用欄位名稱")
-    if st.session_state.custom_cols:
-        st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
-    else:
-        st.warning("目前尚未建立任何自定義欄位。可先到『自定義項目分析 app』建立欄位名稱。")
+    sel_q_mcq = None
+    step1_col, step2_col = st.columns([1, 1])
 
-    st.markdown("---")
-    st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+    with step1_col:
+        st.info("Step 1：建立 MCQ 自定義欄位 (最多 6 個)")
+        if st.session_state.mcq_custom_cols:
+            st.success(f"目前建立的欄位：{', '.join(st.session_state.mcq_custom_cols)}")
+        else:
+            st.warning("目前尚未建立任何 MCQ 自定義欄位。可先在此頁新增欄位名稱。")
 
-    q_mcq = df_mcq_c["題號"].tolist()
-    sel_q_mcq = st.selectbox("選擇要輸入標籤的題號：", q_mcq, key="mcq_q_sel")
-    curr_vals_mcq = st.session_state.mcq_custom_values.get(sel_q_mcq, {})
+        with st.form("mcq_add_field_form", clear_on_submit=True):
+            new_col = st.text_input("輸入新自定義欄位名稱：", key="new_col_input_mcq")
+            submitted = st.form_submit_button("➕ 新增欄位")
+            if submitted:
+                if new_col and new_col not in st.session_state.mcq_custom_cols and len(st.session_state.mcq_custom_cols) < 6:
+                    st.session_state.mcq_custom_cols.append(new_col)
+                    st.session_state.mcq_col_options_history[new_col] = []
 
-    with st.container():
+    with step2_col:
+        st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+        q_mcq = df_mcq_c["題號"].tolist()
+        sel_q_mcq = st.selectbox("選擇要輸入標籤的題號：", q_mcq, key="mcq_q_sel")
+        curr_vals_mcq = st.session_state.mcq_custom_values.get(sel_q_mcq, {})
+
         st.write(f"**正在編輯：第 {sel_q_mcq} 題**")
-        input_results_m = {}
-        for col in st.session_state.custom_cols:
-            history_opts = st.session_state.col_options_history.get(col, [])
-            options = [""] + history_opts + ["➕ 輸入新文本..."]
-            default_idx = 0
-            curr_val = curr_vals_mcq.get(col, "")
-            if curr_val in options:
-                default_idx = options.index(curr_val)
-            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_mcq_{col}")
-            if sel_val == "➕ 輸入新文本...":
-                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_mcq_{col}")
-                input_results_m[col] = new_val
-            else:
-                input_results_m[col] = sel_val
+        save_note_m = st.empty()
+        with st.form(f"mcq_save_form_{sel_q_mcq}", clear_on_submit=True):
+            input_results_m = {}
+            for col in st.session_state.mcq_custom_cols:
+                history_opts = st.session_state.mcq_col_options_history.get(col, [])
+                options = [""] + history_opts + ["➕ 輸入新文本..."]
+                default_idx = 0
+                curr_val = curr_vals_mcq.get(col, "")
+                if curr_val in options:
+                    default_idx = options.index(curr_val)
+                sel_col, new_col = st.columns([1, 1])
+                with sel_col:
+                    sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_mcq_{col}")
+                with new_col:
+                    if sel_val == "➕ 輸入新文本...":
+                        new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_mcq_{col}")
+                        input_results_m[col] = new_val
+                    else:
+                        input_results_m[col] = sel_val
+            submit_btn_m = st.form_submit_button("📥 儲存設定")
 
-        submit_btn_m = st.button("📥 儲存設定", key=f"save_mcq_{sel_q_mcq}")
         if submit_btn_m:
             if sel_q_mcq not in st.session_state.mcq_custom_values:
                 st.session_state.mcq_custom_values[sel_q_mcq] = {}
             for col, val in input_results_m.items():
                 if val:
                     st.session_state.mcq_custom_values[sel_q_mcq][col] = val
-                    if val not in st.session_state.col_options_history[col]:
-                        st.session_state.col_options_history[col].append(val)
-            st.success(f"第 {sel_q_mcq} 題設定已儲存！")
-            st.rerun()
+                    if val not in st.session_state.mcq_col_options_history[col]:
+                        st.session_state.mcq_col_options_history[col].append(val)
+            st.session_state["mcq_last_saved_q"] = sel_q_mcq
+            save_note_m.caption(f"已為第 {sel_q_mcq} 題設定分類")
 
     df_mcq_display = df_mcq_c.copy()
-    for col in st.session_state.custom_cols:
+    for col in st.session_state.mcq_custom_cols:
         df_mcq_display[col] = df_mcq_display["題號"].apply(lambda x: st.session_state.mcq_custom_values.get(x, {}).get(col, ""))
 
     st.write("📊 **總覽表 (自動更新)：**")
@@ -122,9 +137,9 @@ if not df_mcq_c.empty:
     st.markdown("---")
     st.info("Step 3：篩選與高亮分析")
 
-    f_cols_mcq = st.columns(max(len(st.session_state.custom_cols), 1))
+    f_cols_mcq = st.columns(max(len(st.session_state.mcq_custom_cols), 1))
     active_filters_mcq = {}
-    for i, col in enumerate(st.session_state.custom_cols):
+    for i, col in enumerate(st.session_state.mcq_custom_cols):
         with f_cols_mcq[i]:
             u_vals_mcq = [x for x in df_mcq_display[col].unique() if str(x).strip()]
             active_filters_mcq[col] = st.multiselect(f"篩選 {col}", u_vals_mcq, key=f"filter_mcq_{col}")
@@ -140,3 +155,5 @@ if not df_mcq_c.empty:
     st.dataframe(final_mcq_df.style.apply(highlight_mcq_row, axis=1), use_container_width=True, hide_index=True)
 else:
     st.error("找不到可用的 MCQ 分析資料。")
+
+st.markdown("---")
