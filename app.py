@@ -1,6 +1,7 @@
 import streamlit as st
 import pdfplumber
 import pandas as pd
+import altair as alt
 import re
 import io
 import os
@@ -127,6 +128,9 @@ def extract_latest_dse_total_data(file_bytes):
     results = []
     subject_name = "未知科目"
     exam_year = "未知年份"
+    attendance_ys = None
+    attendance_ds = None
+    expected_grade_count = len(target_grades) - 1
 
     with pdfplumber.open(file_bytes) as pdf:
         for page in pdf.pages:
@@ -164,21 +168,24 @@ def extract_latest_dse_total_data(file_bytes):
                                     ys_numbers = parts[1].strip().split()
                                     ds_numbers = parts[2].strip().split()
                                     if ys_numbers and ds_numbers:
-                                        if not any(r['等級'] == grade for r in results):
+                                        if grade == '出席 Sat':
+                                            attendance_ys = int(ys_numbers[-1])
+                                            attendance_ds = int(ds_numbers[-1])
+                                        elif not any(r['等級'] == grade for r in results):
                                             results.append({
                                                 '等級': grade,
                                                 '貴校': int(ys_numbers[-1]),
                                                 '日校': int(ds_numbers[-1])
                                             })
                                 break
-                if len(results) == len(target_grades):
+                if len(results) == expected_grade_count and attendance_ys is not None and attendance_ds is not None:
                     break
 
     df = pd.DataFrame(results)
     if not df.empty:
-        df['等級'] = pd.Categorical(df['等級'], categories=target_grades, ordered=True)
+        df['等級'] = pd.Categorical(df['等級'], categories=[g for g in target_grades if g != '出席 Sat'], ordered=True)
         df = df.sort_values('等級').reset_index(drop=True)
-    return df, subject_name, exam_year
+    return df, subject_name, exam_year, attendance_ys, attendance_ds
 
 # ==========================================
 # 輔助函數：匯出 Excel / Export to Excel
@@ -201,8 +208,10 @@ def cache_processed_data(uploaded_file):
     st.session_state['source_pdf_bytes'] = file_bytes
     st.session_state['processed_item_df'] = extract_item_analysis(io.BytesIO(file_bytes))
     st.session_state['processed_mcq_df'] = extract_mcq_analysis(io.BytesIO(file_bytes))
-    total_df, subject_name, exam_year = extract_latest_dse_total_data(io.BytesIO(file_bytes))
+    total_df, subject_name, exam_year, attendance_ys, attendance_ds = extract_latest_dse_total_data(io.BytesIO(file_bytes))
     st.session_state['processed_total_df'] = total_df
+    st.session_state['processed_total_attendance_ys'] = attendance_ys
+    st.session_state['processed_total_attendance_ds'] = attendance_ds
     st.session_state['processed_subject_name'] = subject_name
     st.session_state['processed_exam_year'] = exam_year
     return True
@@ -252,23 +261,130 @@ with tab0:
             with st.spinner("系統正在處理檔案，請稍候... | Processing file, please wait..."):
                 try:
                     global_file.seek(0)
-                    df_total, subject_name, exam_year = extract_latest_dse_total_data(global_file)
+                    df_total, subject_name, exam_year, attendance_ys, attendance_ds = extract_latest_dse_total_data(global_file)
                     if df_total.empty:
                         st.error("❌ 無法提取數據！請確認你上載的 PDF 包含「總數」表格。")
                     else:
                         st.success(f"✅ 提取成功！已取得 {exam_year} 年數據。")
                         st.subheader(f"📋 {subject_name} {exam_year} 數據概覽 | Data Preview")
-                        with st.expander("✂️ 快速複製單列數據 (貼上至 Excel) | Quick Copy Columns"):
-                            c1, c2 = st.columns(2)
-                            with c1:
-                                st.caption("貴校人數 (Your school)")
-                                ys_text = "\n".join(df_total["貴校"].astype(str).tolist())
-                                st.code(ys_text, language="text")
-                            with c2:
-                                st.caption("日校人數 (Day schools)")
-                                ds_text = "\n".join(df_total["日校"].astype(str).tolist())
-                                st.code(ds_text, language="text")
                         st.table(df_total.style.format(precision=2))
+
+                        if attendance_ys is not None and attendance_ds is not None:
+                            # 分離 UNCL 與其他等級
+                            df_without_uncl = df_total[df_total["等級"] != "UNCL"].reset_index(drop=True)
+                            df_uncl = df_total[df_total["等級"] == "UNCL"].reset_index(drop=True)
+                            
+                            # 處理非 UNCL 等級（使用累計差值）
+                            chart_df = df_without_uncl.melt(
+                                id_vars=["等級"],
+                                value_vars=["貴校", "日校"],
+                                var_name="學校類別",
+                                value_name="人數"
+                            )
+                            chart_df["出席"] = chart_df["學校類別"].map({
+                                "貴校": attendance_ys,
+                                "日校": attendance_ds
+                            })
+                            chart_df = chart_df.sort_values(["學校類別", "等級"])
+                            chart_df["累計差值"] = chart_df.groupby("學校類別")["人數"].diff().fillna(chart_df["人數"])
+                            chart_df["累計差值"] = chart_df["累計差值"].clip(lower=0)
+                            chart_df["百分比"] = (chart_df["累計差值"] / chart_df["出席"]) * 100
+                            chart_df["百分比標籤"] = chart_df["百分比"].apply(lambda x: f"{x:.1f}%")
+                            
+                            # 處理 UNCL（直接用原始數字計算百分比，不參與減法）
+                            if not df_uncl.empty:
+                                uncl_row = df_uncl.iloc[0]
+                                uncl_ys_count = int(uncl_row["貴校"])
+                                uncl_ds_count = int(uncl_row["日校"])
+                                uncl_ys_pct = (uncl_ys_count / attendance_ys) * 100
+                                uncl_ds_pct = (uncl_ds_count / attendance_ds) * 100
+                                
+                                uncl_chart_data = pd.DataFrame({
+                                    "等級": ["UNCL", "UNCL"],
+                                    "學校類別": ["貴校", "日校"],
+                                    "人數": [uncl_ys_count, uncl_ds_count],
+                                    "出席": [attendance_ys, attendance_ds],
+                                    "累計差值": [uncl_ys_count, uncl_ds_count],
+                                    "百分比": [uncl_ys_pct, uncl_ds_pct],
+                                    "百分比標籤": [f"{uncl_ys_pct:.1f}%", f"{uncl_ds_pct:.1f}%"]
+                                })
+                                chart_df = pd.concat([chart_df, uncl_chart_data], ignore_index=True)
+
+                            bar = alt.Chart(chart_df).mark_bar().encode(
+                                x=alt.X("等級:N", title="等級", sort=list(df_total["等級"]), axis=alt.Axis(labelFontSize=14, titleFontSize=14)),
+                                xOffset="學校類別:N",
+                                y=alt.Y("百分比:Q", title="佔出席百分比 (%)", axis=alt.Axis(labelFontSize=14, titleFontSize=14)),
+                                color=alt.Color(
+                                    "學校類別:N",
+                                    scale=alt.Scale(domain=["貴校", "日校"], range=["#7BA8E0", "#FF9999"]),
+                                    title="學校類別"
+                                ),
+                                tooltip=["等級", "學校類別", "累計差值", alt.Tooltip("百分比:Q", format=".1f")]
+                            )
+
+                            labels = alt.Chart(chart_df).mark_text(dy=-8, color="black", fontSize=16).encode(
+                                x=alt.X("等級:N", sort=list(df_total["等級"])),
+                                xOffset="學校類別:N",
+                                y=alt.Y("百分比:Q"),
+                                text=alt.Text("百分比標籤:N")
+                            )
+
+                            chart = (bar + labels).properties(height=420)
+                            st.subheader("📈 等級佔出席人數百分比柱狀圖 | Percentage of Attendance by Grade")
+                            st.altair_chart(chart, use_container_width=True)
+                            
+                            st.subheader("📊 數據表 | Data Table")
+                            pivot_df = pd.DataFrame()
+                            
+                            # 處理非 UNCL 等級
+                            for grade in df_without_uncl["等級"]:
+                                grade_data = chart_df[chart_df["等級"] == grade]
+                                ys_row = grade_data[grade_data["學校類別"] == "貴校"]
+                                ds_row = grade_data[grade_data["學校類別"] == "日校"]
+                                
+                                if not ys_row.empty:
+                                    ys_count = int(ys_row["累計差值"].values[0])
+                                    ys_pct = f"{ys_row['百分比'].values[0]:.1f}%"
+                                else:
+                                    ys_count = 0
+                                    ys_pct = "0.0%"
+                                
+                                if not ds_row.empty:
+                                    ds_count = int(ds_row["累計差值"].values[0])
+                                    ds_pct = f"{ds_row['百分比'].values[0]:.1f}%"
+                                else:
+                                    ds_count = 0
+                                    ds_pct = "0.0%"
+                                
+                                pivot_df = pd.concat([pivot_df, pd.DataFrame({
+                                    "等級": [grade],
+                                    "貴校人數": [ys_count],
+                                    "貴校百分比": [ys_pct],
+                                    "日校人數": [ds_count],
+                                    "日校百分比": [ds_pct]
+                                })], ignore_index=True)
+                            
+                            # 處理 UNCL - 直接使用原始數字，計算百分比（不參與減法）
+                            if not df_uncl.empty:
+                                uncl_row = df_uncl.iloc[0]
+                                uncl_ys_count = int(uncl_row["貴校"])
+                                uncl_ds_count = int(uncl_row["日校"])
+                                uncl_ys_pct = f"{(uncl_ys_count / attendance_ys) * 100:.1f}%"
+                                uncl_ds_pct = f"{(uncl_ds_count / attendance_ds) * 100:.1f}%"
+                                
+                                pivot_df = pd.concat([pivot_df, pd.DataFrame({
+                                    "等級": ["UNCL"],
+                                    "貴校人數": [uncl_ys_count],
+                                    "貴校百分比": [uncl_ys_pct],
+                                    "日校人數": [uncl_ds_count],
+                                    "日校百分比": [uncl_ds_pct]
+                                })], ignore_index=True)
+                            
+                            # 轉置數據表
+                            transposed_df = pivot_df.set_index("等級").T
+                            st.dataframe(transposed_df, use_container_width=True)
+                        else:
+                            st.warning("⚠️ 無法計算百分比，缺少出席人數資料。")
                 except Exception as e:
                     st.error(f"❌ 處理檔案時發生錯誤：{str(e)}")
 
