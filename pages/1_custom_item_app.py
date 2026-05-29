@@ -1,5 +1,7 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
+
+from pdf_utils import extract_item_analysis
 
 st.set_page_config(page_title="自定義項目分析", page_icon="📌", layout="wide")
 st.title("📌 自定義項目分析 app")
@@ -16,7 +18,12 @@ if "mcq_custom_values" not in st.session_state:
 
 st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
 
-if "processed_item_df" not in st.session_state:
+if "processed_item_df" not in st.session_state or st.session_state.processed_item_df is None:
+    source_pdf_bytes = st.session_state.get("source_pdf_bytes")
+    if isinstance(source_pdf_bytes, (bytes, bytearray)) and source_pdf_bytes:
+        st.session_state.processed_item_df = extract_item_analysis(source_pdf_bytes)
+
+if "processed_item_df" not in st.session_state or st.session_state.processed_item_df is None:
     st.warning("尚未找到已處理好的項目分析資料。請先回主 app 完成前處理。")
     st.stop()
 
