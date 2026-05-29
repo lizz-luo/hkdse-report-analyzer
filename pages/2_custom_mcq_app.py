@@ -1,5 +1,7 @@
-import streamlit as st
 import pandas as pd
+import streamlit as st
+
+from pdf_utils import extract_mcq_analysis
 
 st.set_page_config(page_title="自定義 MCQ 分析", page_icon="🎯", layout="wide")
 st.title("🎯 自定義 MCQ 分析 app")
@@ -50,7 +52,12 @@ def highlight_mcq_row(row):
 
 st.page_link("app.py", label="⬅️ 返回主 app", icon="⬅️")
 
-if "processed_mcq_df" not in st.session_state:
+if "processed_mcq_df" not in st.session_state or st.session_state.processed_mcq_df is None:
+    source_pdf_bytes = st.session_state.get("source_pdf_bytes")
+    if isinstance(source_pdf_bytes, (bytes, bytearray)) and source_pdf_bytes:
+        st.session_state.processed_mcq_df = extract_mcq_analysis(source_pdf_bytes)
+
+if "processed_mcq_df" not in st.session_state or st.session_state.processed_mcq_df is None:
     st.warning("尚未找到已處理好的 MCQ 資料。請先回主 app 完成前處理。")
     st.stop()
 
@@ -63,98 +70,51 @@ if not df_mcq_c.empty:
     if "題號" not in df_mcq_c.columns:
         df_mcq_c.insert(0, "題號", df_mcq_c.get("Question Number", range(1, len(df_mcq_c) + 1)))
 
-# ── 橫屏並排：Step 1 & Step 2 ──
-    step_col1, step_col2 = st.columns([1, 1])
+    st.info("Step 1：與自定義項目分析 app 共用欄位名稱")
+    if st.session_state.custom_cols:
+        st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
+    else:
+        st.warning("目前尚未建立任何自定義欄位。可先到『自定義項目分析 app』建立欄位名稱。")
 
-    # ══════════════ Step 1 ══════════════
-    with step_col1:
-        st.info("Step 1：建立自定義欄位 (最多 6 個)")
-        c1, c2 = st.columns([3, 1])
-        with c1:
-            new_col = st.text_input(
-                "輸入新自定義欄位名稱：",
-                key=f"new_col_input_mcq_{st.session_state.new_col_input_counter}"
-            )
-        with c2:
-            st.write("")
-            st.write("")
-            if st.button("➕ 新增欄位", key="add_col_btn_mcq"):
-                if len(st.session_state.custom_cols) >= 6:
-                    # 已達上限，提示用戶
-                    st.error("已達上限！最多只能建立 6 個自定義欄位。")
-                elif not new_col:
-                    st.warning("請先輸入欄位名稱。")
-                elif new_col in st.session_state.custom_cols:
-                    st.warning(f"欄位「{new_col}」已存在。")
-                else:
-                    st.session_state.custom_cols.append(new_col)
-                    st.session_state.col_options_history[new_col] = []
-                    st.session_state.new_col_input_counter += 1
-                    st.rerun()
+    st.markdown("---")
+    st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
 
-        if st.session_state.custom_cols:
-            st.success(f"目前建立的欄位：{', '.join(st.session_state.custom_cols)}")
+    q_mcq = df_mcq_c["題號"].tolist()
+    sel_q_mcq = st.selectbox("選擇要輸入標籤的題號：", q_mcq, key="mcq_q_sel")
+    curr_vals_mcq = st.session_state.mcq_custom_values.get(sel_q_mcq, {})
 
-    # ══════════════ Step 2 ══════════════
-    with step_col2:
-        st.info("Step 2：為每一題設定分類 (下拉聯想與新增)")
+    with st.container():
+        st.write(f"**正在編輯：第 {sel_q_mcq} 題**")
+        input_results_m = {}
+        for col in st.session_state.custom_cols:
+            history_opts = st.session_state.col_options_history.get(col, [])
+            options = [""] + history_opts + ["➕ 輸入新文本..."]
+            default_idx = 0
+            curr_val = curr_vals_mcq.get(col, "")
+            if curr_val in options:
+                default_idx = options.index(curr_val)
+            sel_val = st.selectbox(f"{col}:", options=options, index=default_idx, key=f"sel_mcq_{col}")
+            if sel_val == "➕ 輸入新文本...":
+                new_val = st.text_input(f"請輸入新的「{col}」:", key=f"new_val_mcq_{col}")
+                input_results_m[col] = new_val
+            else:
+                input_results_m[col] = sel_val
 
-        questions = df_mcq_c["題號"].tolist()
-        sel_q = st.selectbox("選擇要輸入標籤的題號：", questions, key="mcq_q_sel")
-        current_values = st.session_state.mcq_custom_values.get(sel_q, {})
+        submit_btn_m = st.button("📥 儲存設定", key=f"save_mcq_{sel_q_mcq}")
+        if submit_btn_m:
+            if sel_q_mcq not in st.session_state.mcq_custom_values:
+                st.session_state.mcq_custom_values[sel_q_mcq] = {}
+            for col, val in input_results_m.items():
+                if val:
+                    st.session_state.mcq_custom_values[sel_q_mcq][col] = val
+                    if val not in st.session_state.col_options_history[col]:
+                        st.session_state.col_options_history[col].append(val)
+            st.success(f"第 {sel_q_mcq} 題設定已儲存！")
+            st.rerun()
 
-        with st.container():
-            st.write(f"**正在編輯：第 {sel_q} 題**")
-            input_results = {}
-            for col in st.session_state.custom_cols:
-                history_opts = st.session_state.col_options_history.get(col, [])
-                options = [""] + history_opts + [f"➕ 輸入新的{col}"]
-                default_idx = 0
-                curr_val = current_values.get(col, "")
-                if curr_val in options:
-                    default_idx = options.index(curr_val)
-
-                # 下拉框也用 counter 控制，儲存後清空
-                sel_val = st.selectbox(
-                    f"{col}:",
-                    options=options,
-                    index=default_idx,
-                    key=f"sel_mcq_{col}_{st.session_state.sel_input_counter}"
-                )
-
-                if sel_val == f"➕ 輸入新的{col}":
-                    # 文字框放在同一行右邊
-                    _, right = st.columns([1, 2])
-                    with right:
-                        new_val = st.text_input(
-                            f"請在此輸入新的「{col}」:",
-                            key=f"new_val_mcq_{col}_{st.session_state.new_val_input_counter}"
-                        )
-                    input_results[col] = new_val
-                else:
-                    input_results[col] = sel_val
-
-            submit_btn = st.button("📥 儲存設定", key=f"save_mcq_{sel_q}")
-            if submit_btn:
-                if sel_q not in st.session_state.mcq_custom_values:
-                    st.session_state.mcq_custom_values[sel_q] = {}
-                for col, val in input_results.items():
-                    if val:
-                        st.session_state.mcq_custom_values[sel_q][col] = val
-                        if val not in st.session_state.col_options_history[col]:
-                            st.session_state.col_options_history[col].append(val)
-                # 同時 +1，清空下拉框與文字框
-                st.session_state.new_val_input_counter += 1
-                st.session_state.sel_input_counter += 1
-                st.success(f"第 {sel_q} 題設定已儲存！")
-                st.rerun()
-
-    # ══════════════ 總覽表 ══════════════
     df_mcq_display = df_mcq_c.copy()
     for col in st.session_state.custom_cols:
-        df_mcq_display[col] = df_mcq_display["題號"].apply(
-            lambda x: st.session_state.mcq_custom_values.get(x, {}).get(col, "")
-        )
+        df_mcq_display[col] = df_mcq_display["題號"].apply(lambda x: st.session_state.mcq_custom_values.get(x, {}).get(col, ""))
 
     st.write("📊 **總覽表 (自動更新)：**")
     st.dataframe(df_mcq_display, use_container_width=True, hide_index=True)
@@ -179,7 +139,4 @@ if not df_mcq_c.empty:
     """)
     st.dataframe(final_mcq_df.style.apply(highlight_mcq_row, axis=1), use_container_width=True, hide_index=True)
 else:
-    st.error("找不到可用的 MCQ 分析資料。"),
-    "new_col_input_counter": 0,
-    "sel_input_counter": 0,
-    "new_val_input_counter": 0
+    st.error("找不到可用的 MCQ 分析資料。")
